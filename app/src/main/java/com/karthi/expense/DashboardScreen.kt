@@ -69,8 +69,9 @@ fun DashboardScreen(vm: MainViewModel, contentPadding: PaddingValues) {
     val all by vm.sheetRows.collectAsState()
     var month by remember { mutableStateOf(YearMonth.now()) }
     val rows = all.filter { it.date.startsWith(month.toString()) }
-    val debits = rows.filter { it.type == "DEBIT" }
-    val credits = rows.filter { it.type == "CREDIT" }
+    val (passThrough, own) = rows.partition { it.category == Categories.NOT_MINE }
+    val debits = own.filter { it.type == "DEBIT" }
+    val credits = own.filter { it.type == "CREDIT" }
     val spent = debits.sumOf { it.amount }
     val received = credits.sumOf { it.amount }
     val shownSpent by animateFloatAsState(spent.toFloat(), fluidSpring(), label = "spent")
@@ -140,6 +141,9 @@ fun DashboardScreen(vm: MainViewModel, contentPadding: PaddingValues) {
         if (credits.isNotEmpty()) {
             item(key = "credits-$month") { CategoryGroup("MONEY IN", totalsByCategory(credits), received, Modifier.animateItem()) }
         }
+        if (passThrough.isNotEmpty()) {
+            item(key = "not-mine-$month") { NotMineGroup(passThrough, Modifier.animateItem()) }
+        }
     }
 }
 
@@ -148,6 +152,79 @@ private fun Stat(label: String, value: String, color: Color) {
     Column {
         Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Text(value, style = MaterialTheme.typography.titleMedium, color = color)
+    }
+}
+
+/**
+ * Money that passed through for someone else. Not counted above; the balance shows
+ * what is still owed (or kept) when money in and out don't match.
+ */
+@Composable
+private fun NotMineGroup(txns: List<SheetTxn>, modifier: Modifier = Modifier) {
+    val cameIn = txns.filter { it.type == "CREDIT" }.sumOf { it.amount }
+    val wentOut = txns.filter { it.type == "DEBIT" }.sumOf { it.amount }
+    val balance = cameIn - wentOut
+    var expanded by remember { mutableStateOf(false) }
+    val chevron by animateFloatAsState(if (expanded) 90f else 0f, fluidSpring(), label = "chevron")
+
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(
+            "NOT MINE · NOT COUNTED ABOVE",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(start = 4.dp),
+        )
+        Column(
+            Modifier.fillMaxWidth().softCard().clickable { expanded = !expanded }.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(24.dp)) {
+                    Stat("Came in", rupees.format(cameIn), MaterialTheme.colorScheme.onSurface)
+                    Stat("Went out", rupees.format(wentOut), MaterialTheme.colorScheme.onSurface)
+                }
+                Icon(
+                    Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.rotate(chevron),
+                )
+            }
+            Text(
+                when {
+                    balance > 0.005 -> "${rupees.format(balance)} received for others is still with you"
+                    balance < -0.005 -> "${rupees.format(-balance)} spent for others is still to be paid back"
+                    else -> "All settled"
+                },
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            AnimatedVisibility(
+                visible = expanded,
+                enter = expandVertically(fluidSpring()) + fadeIn(fluidSpring()),
+                exit = shrinkVertically(fluidSpring()) + fadeOut(fluidSpring()),
+            ) {
+                Column {
+                    txns.sortedByDescending { it.date }.forEach { t ->
+                        Row(Modifier.fillMaxWidth().padding(top = 8.dp)) {
+                            Column(Modifier.weight(1f)) {
+                                Text(t.counterparty ?: "Unknown", style = MaterialTheme.typography.bodyMedium)
+                                Text(
+                                    listOfNotNull(t.date, t.reason).joinToString(" · "),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                            Text(
+                                (if (t.type == "CREDIT") "+" else "−") + rupees.format(t.amount),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = if (t.type == "CREDIT") CreditGreen else DebitRed,
+                            )
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
