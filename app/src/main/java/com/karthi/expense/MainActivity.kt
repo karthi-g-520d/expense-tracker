@@ -207,12 +207,13 @@ private fun TagScreen(vm: MainViewModel) {
         return
     }
 
+    val days = remember(txns) { txns.groupBy { it.date } }
     LazyColumn(
         contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 16.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        txns.groupBy { it.date }.forEach { (date, dayTxns) ->
-            stickyHeader(key = "h-$date") {
+        days.forEach { (date, dayTxns) ->
+            stickyHeader(key = "h-$date", contentType = "day") {
                 Surface(Modifier.fillMaxWidth()) {
                     Column {
                         Text(
@@ -225,7 +226,7 @@ private fun TagScreen(vm: MainViewModel) {
                     }
                 }
             }
-            items(dayTxns, key = { it.id }) { t ->
+            items(dayTxns, key = { it.id }, contentType = { "txn" }) { t ->
                 TxnCard(t) { category, reason -> vm.tag(t.id, category, reason) }
             }
         }
