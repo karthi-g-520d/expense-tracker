@@ -1,13 +1,16 @@
 package com.karthi.expense.data
 
+import com.karthi.expense.core.Shares
+import com.karthi.expense.core.TxnType
+import java.io.IOException
+import java.math.BigDecimal
+import java.net.HttpURLConnection
+import java.net.URL
+import java.net.URLEncoder
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
-import java.io.IOException
-import java.net.HttpURLConnection
-import java.net.URL
-import java.net.URLEncoder
 
 /**
  * Writes and reads the spreadsheet directly through the Google Sheets API, using the
@@ -50,7 +53,7 @@ class GoogleSheetsClient(
         val id = spreadsheetId()
         val token = auth.accessToken()
         if (repairedId != id) repair(token, id)
-        val rows = values(token, id, "$TAB!A2:L", unformatted = true).mapNotNull { r ->
+        val rows = values(token, id, "$TAB!A2:N", unformatted = true).mapNotNull { r ->
             val txnId = r.optString(0)
             if (txnId.isEmpty()) return@mapNotNull null
             SheetTxn(
@@ -62,8 +65,10 @@ class GoogleSheetsClient(
                 counterparty = r.optString(6).ifEmpty { null },
                 category = r.optString(7).ifEmpty { null },
                 reason = r.optString(8).ifEmpty { null },
+                shares = r.optString(12).ifEmpty { null },
             )
         }
+        writePeople(token, id, rows)
         SheetData(rows, linkFor(id))
     }
 
@@ -137,6 +142,8 @@ class GoogleSheetsClient(
         .put(t.id).put(t.date).put(t.type).put(t.amount.toDouble()).put(t.bank).put(asText(t.account))
         .put(t.counterparty.orEmpty()).put(t.category.orEmpty()).put(t.reason.orEmpty())
         .put(asText(t.reference)).put(t.balance?.toDouble() ?: "").put(syncedAt)
+        .put(t.shares.orEmpty())
+        .put(Shares.myPart(BigDecimal(t.amount), Shares.parse(t.shares)).toDouble())
 
     // Fixes sheets written by older versions (dates shown as numbers, summary formula
     // broken by inserted rows) and tabs whose rows got moved. Safe to repeat.
@@ -154,8 +161,17 @@ class GoogleSheetsClient(
      */
     private suspend fun fixLayout(token: String, id: String) {
         val cells = values(token, id, TAB, unformatted = true)
-        val header = cells.firstOrNull()?.let { r -> List(minOf(r.length(), HEADERS.size)) { r.optString(it) } }
-        if (header == HEADERS) return
+        val header = cells.firstOrNull()?.let { r -> List(r.length()) { r.optString(it) } }.orEmpty()
+        if (header.take(LEGACY_COLUMNS) == HEADERS.take(LEGACY_COLUMNS)) {
+            // Sheets made before shares existed just need the two new column titles.
+            if (header.size < HEADERS.size) {
+                request(
+                    "PUT", token, "$API/$id/values/${enc("$TAB!A1")}?valueInputOption=RAW",
+                    JSONObject().put("values", JSONArray().put(JSONArray(HEADERS))),
+                )
+            }
+            return
+        }
 
         val found = LinkedHashMap<String, JSONArray>()
         for (r in cells) {
@@ -175,6 +191,8 @@ class GoogleSheetsClient(
                     put(asText(plain(r.opt(start + 9))))
                     put(r.opt(start + 10) ?: "")
                     put(dateTime(r.opt(start + 11)))
+                    put(r.optString(start + 12))
+                    put(r.opt(start + 13) ?: "")
                 }
             }
         }
@@ -202,10 +220,38 @@ class GoogleSheetsClient(
         return SHEETS_EPOCH.atStartOfDay().plusSeconds(seconds).toString()
     }
 
+    /** Rewrites the People tab with everyone whose balance isn't settled yet. */
+    private fun writePeople(token: String, id: String, rows: List<SheetTxn>) {
+        val meta = request("GET", token, "$API/$id?fields=sheets.properties", null)
+        val sheets = meta.getJSONArray("sheets")
+        val titles = List(sheets.length()) { sheets.getJSONObject(it).getJSONObject("properties").getString("title") }
+        if (PEOPLE !in titles) {
+            val add = JSONObject().put("addSheet", JSONObject().put("properties", JSONObject().put("title", PEOPLE)))
+            request("POST", token, "$API/$id:batchUpdate", JSONObject().put("requests", JSONArray().put(add)))
+        }
+
+        val open = Shares.balances(rows.map { (if (it.type == "CREDIT") TxnType.CREDIT else TxnType.DEBIT) to it.shares })
+            .filter { it.value.abs() >= BigDecimal("0.01") }
+            .entries.sortedByDescending { it.value }
+        val values = JSONArray().put(JSONArray(listOf("Person", "Balance", "Status")))
+        open.forEach { (name, balance) ->
+            values.put(
+                JSONArray().put(name).put(balance.toDouble())
+                    .put(if (balance.signum() > 0) "Owes you" else "You hold their money")
+            )
+        }
+        request("POST", token, "$API/$id/values/${enc(PEOPLE)}:clear", JSONObject())
+        request(
+            "PUT", token, "$API/$id/values/${enc("$PEOPLE!A1")}?valueInputOption=RAW",
+            JSONObject().put("values", values),
+        )
+    }
+
     private fun applyColumnFormats(token: String, id: String, tabId: Int) {
         val requests = JSONArray()
             .put(numberFormat(tabId, 1, "DATE", "yyyy-mm-dd"))
             .put(numberFormat(tabId, 3, "NUMBER", "#,##0.00"))
+            .put(numberFormat(tabId, 13, "NUMBER", "#,##0.00"))
         request("POST", token, "$API/$id:batchUpdate", JSONObject().put("requests", requests))
     }
 
@@ -272,17 +318,17 @@ class GoogleSheetsClient(
         const val TAB = "Transactions"
         const val SUMMARY = "Monthly Summary"
         // Whole-column ranges never shift when rows are inserted, and ISNUMBER skips the header
-        // row and blanks (a real date is a number underneath).
+        // row and blanks (a real date is a number underneath). Totals use your own part (my_amount),
+        // falling back to the full amount for rows synced before shares existed.
         val SUMMARY_FORMULA = "=QUERY({ARRAYFORMULA(IF(ISNUMBER($TAB!B:B),TEXT($TAB!B:B,\"yyyy-mm\"),)), " +
-            "$TAB!C:C, $TAB!D:D, $TAB!H:H}, " +
-            "\"select Col1, Col2, Col4, sum(Col3) where Col1 is not null " +
+            "$TAB!C:C, ARRAYFORMULA(IF($TAB!N:N=\"\",$TAB!D:D,$TAB!N:N)), $TAB!H:H}, " +
+            "\"select Col1, Col2, Col4, sum(Col3) where Col1 is not null and Col3 <> 0 " +
             "group by Col1, Col2, Col4 order by Col1 desc, Col2 desc, sum(Col3) desc " +
             "label Col1 'Month', Col2 'Type', Col4 'Category', sum(Col3) 'Total'\", 0)"
-        val ID_PATTERN = Regex("(ICICI|IOB)-(DEBIT|CREDIT)-.+")
         val SHEETS_EPOCH: java.time.LocalDate = java.time.LocalDate.of(1899, 12, 30)
         val HEADERS = listOf(
             "id", "date", "type", "amount", "bank", "account", "counterparty",
-            "category", "reason", "reference", "balance", "synced_at",
+            "category", "reason", "reference", "balance", "synced_at", "shares", "my_amount",
         )
     }
 }

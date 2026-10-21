@@ -23,6 +23,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -44,12 +45,16 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import com.karthi.expense.core.Shares
+import com.karthi.expense.core.TxnType
 import com.karthi.expense.data.Categories
 import com.karthi.expense.data.SheetTxn
+import java.math.BigDecimal
 import java.text.NumberFormat
 import java.time.YearMonth
 import java.time.format.DateTimeFormatter
 import java.util.Locale
+import kotlin.math.abs
 
 private val rupees: NumberFormat = NumberFormat.getCurrencyInstance(Locale("en", "IN"))
 private val monthTitle = DateTimeFormatter.ofPattern("MMMM yyyy", Locale.ENGLISH)
@@ -58,7 +63,7 @@ private data class CategoryTotal(val category: String, val total: Double, val tx
 
 private fun totalsByCategory(rows: List<SheetTxn>) = rows
     .groupBy { it.category ?: "Uncategorised" }
-    .map { (c, txns) -> CategoryTotal(c, txns.sumOf { it.amount }, txns) }
+    .map { (c, txns) -> CategoryTotal(c, txns.sumOf { it.myAmount() }, txns) }
     .sortedByDescending { it.total }
 
 /** Monthly statement from the sheet: spent, received, and where the money went. */
@@ -69,11 +74,12 @@ fun DashboardScreen(vm: MainViewModel, contentPadding: PaddingValues) {
     val all by vm.sheetRows.collectAsState()
     var month by remember { mutableStateOf(YearMonth.now()) }
     val rows = all.filter { it.date.startsWith(month.toString()) }
-    val (passThrough, own) = rows.partition { it.category == Categories.NOT_MINE }
+    // Only your own part counts; rows that were entirely other people's drop out.
+    val own = rows.filter { abs(it.myAmount()) >= 0.005 }
     val debits = own.filter { it.type == "DEBIT" }
     val credits = own.filter { it.type == "CREDIT" }
-    val spent = debits.sumOf { it.amount }
-    val received = credits.sumOf { it.amount }
+    val spent = debits.sumOf { it.myAmount() }
+    val received = credits.sumOf { it.myAmount() }
     val shownSpent by animateFloatAsState(spent.toFloat(), fluidSpring(), label = "spent")
 
     LazyColumn(Modifier.fillMaxHeight(), contentPadding = contentPadding, verticalArrangement = Arrangement.spacedBy(14.dp)) {
@@ -125,6 +131,8 @@ fun DashboardScreen(vm: MainViewModel, contentPadding: PaddingValues) {
             }
         }
 
+        item(key = "people") { PeopleCard(vm, all, Modifier.animateItem()) }
+
         if (rows.isEmpty()) {
             item {
                 Text(
@@ -141,9 +149,7 @@ fun DashboardScreen(vm: MainViewModel, contentPadding: PaddingValues) {
         if (credits.isNotEmpty()) {
             item(key = "credits-$month") { CategoryGroup("MONEY IN", totalsByCategory(credits), received, Modifier.animateItem()) }
         }
-        if (passThrough.isNotEmpty()) {
-            item(key = "not-mine-$month") { NotMineGroup(passThrough, Modifier.animateItem()) }
-        }
+
     }
 }
 
@@ -155,74 +161,140 @@ private fun Stat(label: String, value: String, color: Color) {
     }
 }
 
+private data class PersonBalance(val name: String, val balance: BigDecimal, val txns: List<Pair<SheetTxn, BigDecimal>>)
+
+/** Everyone whose balance isn't zero yet, across all months. */
+private fun openBalances(all: List<SheetTxn>): List<PersonBalance> {
+    val balances = Shares.balances(all.map { (if (it.type == "CREDIT") TxnType.CREDIT else TxnType.DEBIT) to it.shares })
+    return balances
+        .filter { it.value.abs() >= BigDecimal("0.01") }
+        .map { (name, balance) ->
+            val txns = all.mapNotNull { t ->
+                val share = Shares.parse(t.shares).entries.firstOrNull { it.key.equals(name, ignoreCase = true) }?.value
+                    ?: return@mapNotNull null
+                t to Shares.balanceChange(if (t.type == "CREDIT") TxnType.CREDIT else TxnType.DEBIT, share)
+            }
+            PersonBalance(name, balance, txns)
+        }
+        .sortedByDescending { it.balance.abs() }
+}
+
 /**
- * Money that passed through for someone else. Not counted above; the balance shows
- * what is still owed (or kept) when money in and out don't match.
+ * Money between you and friends: what they owe you (split bills, things bought for them)
+ * and what of theirs you still hold. Hidden when everyone is settled.
  */
 @Composable
-private fun NotMineGroup(txns: List<SheetTxn>, modifier: Modifier = Modifier) {
-    val cameIn = txns.filter { it.type == "CREDIT" }.sumOf { it.amount }
-    val wentOut = txns.filter { it.type == "DEBIT" }.sumOf { it.amount }
-    val balance = cameIn - wentOut
-    var expanded by remember { mutableStateOf(false) }
-    val chevron by animateFloatAsState(if (expanded) 90f else 0f, fluidSpring(), label = "chevron")
+private fun PeopleCard(vm: MainViewModel, all: List<SheetTxn>, modifier: Modifier = Modifier) {
+    val open = remember(all) { openBalances(all) }
+    if (open.isEmpty() && vm.peopleMessage == null) return
+    val owedToYou = open.filter { it.balance.signum() > 0 }.sumOf { it.balance }
+    val youHold = open.filter { it.balance.signum() < 0 }.sumOf { it.balance.abs() }
+    var settling by remember { mutableStateOf<PersonBalance?>(null) }
 
     Column(modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(
-            "NOT MINE · NOT COUNTED ABOVE",
+            "PEOPLE",
             style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(start = 4.dp),
         )
-        Column(
-            Modifier.fillMaxWidth().softCard().clickable { expanded = !expanded }.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(24.dp)) {
-                    Stat("Came in", rupees.format(cameIn), MaterialTheme.colorScheme.onSurface)
-                    Stat("Went out", rupees.format(wentOut), MaterialTheme.colorScheme.onSurface)
-                }
-                Icon(
-                    Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.rotate(chevron),
+        Column(Modifier.fillMaxWidth().softCard()) {
+            Row(Modifier.padding(16.dp), horizontalArrangement = Arrangement.spacedBy(24.dp)) {
+                Stat("Others owe you", rupees.format(owedToYou), CreditGreen)
+                Stat("You hold of others'", rupees.format(youHold), MaterialTheme.colorScheme.onSurface)
+            }
+            vm.peopleMessage?.let {
+                Text(
+                    it,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 8.dp),
+                )
+            }
+            open.forEach { p ->
+                HorizontalDivider(Modifier.padding(start = 16.dp), thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant)
+                PersonRow(p, onSettle = { settling = p })
+            }
+        }
+    }
+
+    settling?.let { p ->
+        val amount = rupees.format(p.balance.abs())
+        AlertDialog(
+            onDismissRequest = { settling = null },
+            title = { Text("Settle with ${p.name}?") },
+            text = {
+                Text(
+                    if (p.balance.signum() > 0) {
+                        "${p.name} owes you $amount. Settling lets it go: $amount is counted as your own expense."
+                    } else {
+                        "You hold $amount of ${p.name}'s. Settling keeps it: $amount is counted as your own income."
+                    } + " If money is actually changing hands, tag that payment with their name instead."
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    vm.settle(p.name, p.balance)
+                    settling = null
+                }) { Text("Settle") }
+            },
+            dismissButton = { TextButton(onClick = { settling = null }) { Text("Cancel") } },
+        )
+    }
+}
+
+@Composable
+private fun PersonRow(p: PersonBalance, onSettle: () -> Unit) {
+    var expanded by remember(p.name) { mutableStateOf(false) }
+    val chevron by animateFloatAsState(if (expanded) 90f else 0f, fluidSpring(), label = "chevron")
+    val owesYou = p.balance.signum() > 0
+
+    Column(Modifier.fillMaxWidth().clickable { expanded = !expanded }.padding(horizontal = 16.dp, vertical = 12.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(p.name, style = MaterialTheme.typography.bodyLarge)
+                Text(
+                    if (owesYou) "owes you" else "you hold theirs",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
             Text(
-                when {
-                    balance > 0.005 -> "${rupees.format(balance)} received for others is still with you"
-                    balance < -0.005 -> "${rupees.format(-balance)} spent for others is still to be paid back"
-                    else -> "All settled"
-                },
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                rupees.format(p.balance.abs()),
+                style = MaterialTheme.typography.bodyLarge,
+                color = if (owesYou) CreditGreen else MaterialTheme.colorScheme.onSurface,
             )
-            AnimatedVisibility(
-                visible = expanded,
-                enter = expandVertically(fluidSpring()) + fadeIn(fluidSpring()),
-                exit = shrinkVertically(fluidSpring()) + fadeOut(fluidSpring()),
-            ) {
-                Column {
-                    txns.sortedByDescending { it.date }.forEach { t ->
-                        Row(Modifier.fillMaxWidth().padding(top = 8.dp)) {
-                            Column(Modifier.weight(1f)) {
-                                Text(t.counterparty ?: "Unknown", style = MaterialTheme.typography.bodyMedium)
-                                Text(
-                                    listOfNotNull(t.date, t.reason).joinToString(" · "),
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                            }
+            Icon(
+                Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.rotate(chevron),
+            )
+        }
+        AnimatedVisibility(
+            visible = expanded,
+            enter = expandVertically(fluidSpring()) + fadeIn(fluidSpring()),
+            exit = shrinkVertically(fluidSpring()) + fadeOut(fluidSpring()),
+        ) {
+            Column(Modifier.padding(top = 6.dp)) {
+                p.txns.sortedByDescending { it.first.date }.forEach { (t, change) ->
+                    Row(Modifier.fillMaxWidth().padding(top = 8.dp)) {
+                        Column(Modifier.weight(1f)) {
+                            Text(t.counterparty ?: "Unknown", style = MaterialTheme.typography.bodyMedium)
                             Text(
-                                (if (t.type == "CREDIT") "+" else "−") + rupees.format(t.amount),
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = if (t.type == "CREDIT") CreditGreen else DebitRed,
+                                listOfNotNull(t.date, t.reason).joinToString(" · "),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
+                        Text(
+                            (if (change.signum() >= 0) "+" else "−") + rupees.format(change.abs()),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
                     }
                 }
+                TextButton(onClick = onSettle, modifier = Modifier.padding(top = 4.dp)) { Text("Settle the rest") }
             }
         }
     }
@@ -300,7 +372,16 @@ private fun CategoryRow(c: CategoryTotal, monthTotal: Double) {
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
-                        Text(rupees.format(t.amount), style = MaterialTheme.typography.bodyMedium)
+                        Column(horizontalAlignment = Alignment.End) {
+                            Text(rupees.format(t.myAmount()), style = MaterialTheme.typography.bodyMedium)
+                            if (t.shares != null) {
+                                Text(
+                                    "of ${rupees.format(t.amount)}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
                     }
                 }
             }

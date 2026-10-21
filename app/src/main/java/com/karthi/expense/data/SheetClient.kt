@@ -1,13 +1,15 @@
 package com.karthi.expense.data
 
+import com.karthi.expense.core.Shares
+import java.io.IOException
+import java.math.BigDecimal
+import java.net.HttpURLConnection
+import java.net.URL
+import java.net.URLEncoder
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
-import java.io.IOException
-import java.net.HttpURLConnection
-import java.net.URL
-import java.net.URLEncoder
 
 /** Rows in the sheet, plus the spreadsheet's own link when known. */
 class SheetData(val rows: List<SheetTxn>, val sheetUrl: String?)
@@ -38,6 +40,8 @@ class SheetClient(private val settings: SheetSettings) : SheetBackend {
                     .put("amount", t.amount).put("bank", t.bank).put("account", t.account)
                     .put("counterparty", t.counterparty).put("category", t.category)
                     .put("reason", t.reason).put("reference", t.reference).put("balance", t.balance)
+                    .put("shares", t.shares)
+                    .put("my_amount", Shares.myPart(BigDecimal(t.amount), Shares.parse(t.shares)).toDouble())
             )
         }
         val body = JSONObject().put("token", token).put("rows", rows).toString()
@@ -65,6 +69,7 @@ class SheetClient(private val settings: SheetSettings) : SheetBackend {
                 counterparty = r.optString("counterparty").ifEmpty { null },
                 category = r.optString("category").ifEmpty { null },
                 reason = r.optString("reason").ifEmpty { null },
+                shares = r.optString("shares").ifEmpty { null },
             )
         }
         SheetData(txns, res.optString("sheetUrl").ifEmpty { null })
