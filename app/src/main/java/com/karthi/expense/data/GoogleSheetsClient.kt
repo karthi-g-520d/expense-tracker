@@ -13,7 +13,12 @@ import java.net.URLEncoder
  * Writes and reads the spreadsheet directly through the Google Sheets API, using the
  * signed-in account. Uses the same layout as sheet/Code.gs so both backends are interchangeable.
  */
-class GoogleSheetsClient(private val auth: GoogleAuth, private val settings: SheetSettings) : SheetBackend {
+class GoogleSheetsClient(
+    private val auth: GoogleAuth,
+    private val settings: SheetSettings,
+    /** Transactions this phone already synced; used to restore rows when the tab's layout is damaged. */
+    private val localSynced: suspend () -> List<PendingTxn>,
+) : SheetBackend {
 
     /** Spreadsheet whose formats and summary formula were already repaired in this app run. */
     @Volatile private var repairedId: String? = null
@@ -21,16 +26,12 @@ class GoogleSheetsClient(private val auth: GoogleAuth, private val settings: She
     override suspend fun push(txns: List<PendingTxn>): List<String> = withContext(Dispatchers.IO) {
         val id = spreadsheetId()
         val token = auth.accessToken()
+        repair(token, id)
 
         val existing = values(token, id, "$TAB!A2:A").map { it.optString(0) }.toSet()
         val rows = JSONArray()
         txns.filter { it.id !in existing }.forEach { t ->
-            rows.put(
-                JSONArray()
-                    .put(t.id).put(t.date).put(t.type).put(t.amount.toDouble()).put(t.bank).put(asText(t.account))
-                    .put(t.counterparty.orEmpty()).put(t.category.orEmpty()).put(t.reason.orEmpty())
-                    .put(asText(t.reference)).put(t.balance?.toDouble() ?: "").put(java.time.LocalDateTime.now().toString())
-            )
+            rows.put(rowFor(t, java.time.LocalDateTime.now().toString()))
         }
         if (rows.length() > 0) {
             request(
@@ -41,7 +42,6 @@ class GoogleSheetsClient(private val auth: GoogleAuth, private val settings: She
                 JSONObject().put("values", rows),
             )
         }
-        repair(token, id)
         // Ones that were already in the sheet count as synced too.
         txns.map { it.id }
     }
@@ -133,12 +133,73 @@ class GoogleSheetsClient(private val auth: GoogleAuth, private val settings: She
         writeSummaryFormula(token, id)
     }
 
+    private fun rowFor(t: PendingTxn, syncedAt: String): JSONArray = JSONArray()
+        .put(t.id).put(t.date).put(t.type).put(t.amount.toDouble()).put(t.bank).put(asText(t.account))
+        .put(t.counterparty.orEmpty()).put(t.category.orEmpty()).put(t.reason.orEmpty())
+        .put(asText(t.reference)).put(t.balance?.toDouble() ?: "").put(syncedAt)
+
     // Fixes sheets written by older versions (dates shown as numbers, summary formula
-    // broken by inserted rows). Safe to repeat.
-    private fun repair(token: String, id: String) {
+    // broken by inserted rows) and tabs whose rows got moved. Safe to repeat.
+    private suspend fun repair(token: String, id: String) {
+        fixLayout(token, id)
         applyColumnFormats(token, id, tabId(token, id))
         writeSummaryFormula(token, id)
         repairedId = id
+    }
+
+    /**
+     * If the header isn't in A1:L1 (rows were moved or pasted over), collects every row that
+     * starts with a transaction id, wherever it sits, and rewrites the tab from A1. Rows whose
+     * id cell was lost are restored from what this phone synced.
+     */
+    private suspend fun fixLayout(token: String, id: String) {
+        val cells = values(token, id, TAB, unformatted = true)
+        val header = cells.firstOrNull()?.let { r -> List(minOf(r.length(), HEADERS.size)) { r.optString(it) } }
+        if (header == HEADERS) return
+
+        val found = LinkedHashMap<String, JSONArray>()
+        for (r in cells) {
+            for (start in 0 until r.length()) {
+                val txnId = r.optString(start)
+                if (!ID_PATTERN.matches(txnId) || txnId in found) continue
+                found[txnId] = JSONArray().apply {
+                    put(txnId)
+                    put(isoDate(r.opt(start + 1)))
+                    put(r.optString(start + 2))
+                    put(r.opt(start + 3) ?: "")
+                    put(r.optString(start + 4))
+                    put(asText(plain(r.opt(start + 5))))
+                    put(r.optString(start + 6))
+                    put(r.optString(start + 7))
+                    put(r.optString(start + 8))
+                    put(asText(plain(r.opt(start + 9))))
+                    put(r.opt(start + 10) ?: "")
+                    put(dateTime(r.opt(start + 11)))
+                }
+            }
+        }
+        localSynced().filter { it.id !in found }.forEach { found[it.id] = rowFor(it, "") }
+
+        val rows = JSONArray().put(JSONArray(HEADERS))
+        found.values.sortedBy { it.optString(1) }.forEach { rows.put(it) }
+        request("POST", token, "$API/$id/values/${enc(TAB)}:clear", JSONObject())
+        request(
+            "PUT", token, "$API/$id/values/${enc("$TAB!A1")}?valueInputOption=USER_ENTERED",
+            JSONObject().put("values", rows),
+        )
+    }
+
+    // Unformatted reads return numbers for cells like account "597"; turn 597.0 back into "597".
+    private fun plain(value: Any?): String? = when (value) {
+        null, "" -> null
+        is Number -> java.math.BigDecimal(value.toString()).stripTrailingZeros().toPlainString()
+        else -> value.toString()
+    }
+
+    private fun dateTime(value: Any?): String {
+        val serial = (value as? Number)?.toDouble() ?: return value?.toString().orEmpty()
+        val seconds = Math.round(serial * 86_400)
+        return SHEETS_EPOCH.atStartOfDay().plusSeconds(seconds).toString()
     }
 
     private fun applyColumnFormats(token: String, id: String, tabId: Int) {
@@ -217,6 +278,7 @@ class GoogleSheetsClient(private val auth: GoogleAuth, private val settings: She
             "\"select Col1, Col2, Col4, sum(Col3) where Col1 is not null " +
             "group by Col1, Col2, Col4 order by Col1 desc, Col2 desc, sum(Col3) desc " +
             "label Col1 'Month', Col2 'Type', Col4 'Category', sum(Col3) 'Total'\", 0)"
+        val ID_PATTERN = Regex("(ICICI|IOB)-(DEBIT|CREDIT)-.+")
         val SHEETS_EPOCH: java.time.LocalDate = java.time.LocalDate.of(1899, 12, 30)
         val HEADERS = listOf(
             "id", "date", "type", "amount", "bank", "account", "counterparty",

@@ -33,7 +33,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val settings = SheetSettings(app)
     private val appsScript = SheetClient(settings)
     private val googleAuth = GoogleAuth(app)
-    private val googleSheets = GoogleSheetsClient(googleAuth, settings)
+    private val googleSheets = GoogleSheetsClient(googleAuth, settings) { dao.synced() }
 
     /** Google sign-in wins when it's fully set up; otherwise the Apps Script link. */
     private val sheet: SheetBackend get() = if (settings.usesGoogleSignIn) googleSheets else appsScript
