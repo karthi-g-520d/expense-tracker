@@ -70,7 +70,7 @@ function doGet(e) {
       : v[i]);
     return o;
   });
-  return json({ rows: rows });
+  return json({ rows: rows, sheetUrl: SpreadsheetApp.getActiveSpreadsheet().getUrl() });
 }
 
 function authorized(token) {

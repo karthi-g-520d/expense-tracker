@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -22,8 +23,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
+import com.karthi.expense.data.Categories
 import com.karthi.expense.data.SheetTxn
 import java.text.NumberFormat
 import java.time.YearMonth
@@ -67,7 +68,10 @@ fun DashboardScreen(vm: MainViewModel) {
         }
 
         item {
-            Card(Modifier.fillMaxWidth()) {
+            Card(
+                Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
+            ) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text("Spent", style = MaterialTheme.typography.labelMedium)
                     Text(rupees.format(spent), style = MaterialTheme.typography.headlineMedium)
@@ -99,7 +103,7 @@ private fun CategoryRow(c: CategoryTotal, monthTotal: Double) {
 
     Column(Modifier.fillMaxWidth().clickable { expanded = !expanded }.padding(vertical = 4.dp)) {
         Row(Modifier.fillMaxWidth()) {
-            Text(c.category, modifier = Modifier.weight(1f))
+            Text(Categories.label(c.category), modifier = Modifier.weight(1f))
             Text("${rupees.format(c.total)}  ${(share * 100).toInt()}%")
         }
         LinearProgressIndicator(progress = { share }, modifier = Modifier.fillMaxWidth().padding(top = 4.dp))
@@ -111,7 +115,7 @@ private fun CategoryRow(c: CategoryTotal, monthTotal: Double) {
                         Text(
                             listOfNotNull(t.date, t.reason).joinToString(" · "),
                             style = MaterialTheme.typography.bodySmall,
-                            color = Color.Gray,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
                     Text(rupees.format(t.amount), style = MaterialTheme.typography.bodyMedium)

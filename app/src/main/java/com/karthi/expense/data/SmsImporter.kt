@@ -45,6 +45,11 @@ class SmsImporter(private val context: Context, private val dao: PendingTxnDao) 
         added
     }
 
+    /** Next import re-reads from the 1st of this month. Already-stored SMS are skipped by id. */
+    fun rescanThisMonth() {
+        prefs.edit().remove(KEY_LAST_SMS_TIME).apply()
+    }
+
     // First run looks back to the 1st of the current month rather than the whole inbox.
     private fun startOfThisMonth(): Long =
         LocalDate.now().withDayOfMonth(1).atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()

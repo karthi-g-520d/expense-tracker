@@ -11,7 +11,12 @@ One-time setup, about 5 minutes. No Google Cloud project needed.
    - Execute as: **Me**
    - Who has access: **Anyone**
    Click **Deploy** and copy the web app URL (ends in `/exec`).
-6. In the project root, add to `local.properties` (this file is not committed):
+6. In the app, tap ⚙️ **Settings**, paste the web app link and the token, tap **Save**, then
+   **Test connection**.
+
+   (Optional, for builds: you can instead bake them in via `local.properties`, which is not
+   committed, or the `SHEET_URL` / `SHEET_TOKEN` repo secrets used by CI. Settings in the app
+   win over these.)
 
    ```
    sheet.url=https://script.google.com/macros/s/XXXX/exec
@@ -24,3 +29,6 @@ token, so keep both private. If the token ever leaks, delete the `TOKEN` script 
 
 When you change `Code.gs` later, use **Deploy > Manage deployments > Edit > New version** so the
 URL stays the same.
+
+If you update `Code.gs` from this repo (for example to get the **Open the spreadsheet** button in
+Settings), paste the new code and publish a new version as described above.
