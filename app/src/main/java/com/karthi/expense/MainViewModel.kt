@@ -8,6 +8,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.karthi.expense.data.AppDatabase
 import com.karthi.expense.data.PendingTxn
+import com.karthi.expense.data.SheetClient
 import com.karthi.expense.data.SmsImporter
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -18,6 +19,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     private val dao = AppDatabase.get(app).pendingTxnDao()
     private val importer = SmsImporter(app, dao)
+    private val sheet = SheetClient()
 
     val unsynced: StateFlow<List<PendingTxn>> =
         dao.observeUnsynced().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
@@ -29,6 +31,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     var importing by mutableStateOf(false)
         private set
 
+    var syncing by mutableStateOf(false)
+        private set
+
+    /** Result of the last sync, shown under the Sync button. */
+    var syncMessage by mutableStateOf<String?>(null)
+        private set
+
     fun importSms() {
         if (importing) return
         importing = true
@@ -37,6 +46,32 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 lastImportCount = importer.importNew()
             } finally {
                 importing = false
+            }
+        }
+    }
+
+    fun tag(id: String, category: String?, reason: String?) {
+        viewModelScope.launch { dao.updateTag(id, category, reason?.ifBlank { null }) }
+    }
+
+    /** Sends every transaction that has a category; untagged ones stay on the phone. */
+    fun sync() {
+        if (syncing) return
+        syncing = true
+        viewModelScope.launch {
+            syncMessage = try {
+                val tagged = dao.taggedUnsynced()
+                if (tagged.isEmpty()) {
+                    "Pick a category on at least one transaction first"
+                } else {
+                    val ids = sheet.push(tagged)
+                    dao.markSynced(ids, System.currentTimeMillis())
+                    "Synced ${ids.size} transaction(s)"
+                }
+            } catch (e: Exception) {
+                "Sync failed: ${e.message}"
+            } finally {
+                syncing = false
             }
         }
     }
