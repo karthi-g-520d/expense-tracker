@@ -12,16 +12,20 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Tab
+import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -46,6 +50,25 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 private fun MainScreen(vm: MainViewModel = viewModel()) {
+    var tab by remember { mutableIntStateOf(0) }
+    val pending by vm.unsynced.collectAsState()
+
+    Column(Modifier.safeDrawingPadding()) {
+        TabRow(selectedTabIndex = tab) {
+            Tab(selected = tab == 0, onClick = { tab = 0 }, text = { Text("To tag (${pending.size})") })
+            Tab(selected = tab == 1, onClick = { tab = 1 }, text = { Text("Dashboard") })
+        }
+        Column(Modifier.padding(16.dp)) {
+            when (tab) {
+                0 -> TagScreen(vm)
+                else -> DashboardScreen(vm)
+            }
+        }
+    }
+}
+
+@Composable
+private fun TagScreen(vm: MainViewModel) {
     val context = LocalContext.current
     var hasSmsPermission by remember {
         mutableStateOf(
@@ -56,7 +79,7 @@ private fun MainScreen(vm: MainViewModel = viewModel()) {
         hasSmsPermission = granted
     }
 
-    // Read new SMS every time the app opens (and right after permission is granted).
+    // Read new SMS every time this tab opens (and right after permission is granted).
     LaunchedEffect(hasSmsPermission) {
         if (hasSmsPermission) vm.importSms() else askPermission.launch(Manifest.permission.READ_SMS)
     }
@@ -64,7 +87,7 @@ private fun MainScreen(vm: MainViewModel = viewModel()) {
     val txns by vm.unsynced.collectAsState()
     val taggedCount = txns.count { it.category != null }
 
-    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         if (!hasSmsPermission) {
             Text("SMS permission is needed to find your bank transactions.")
             Button(onClick = { askPermission.launch(Manifest.permission.READ_SMS) }) { Text("Allow SMS access") }

@@ -25,4 +25,4 @@ Set up the sheet first and add `sheet.url` and `sheet.token` to `local.propertie
 1. Project setup, sheet script, SMS parser ✅
 2. Read new SMS since last run and store them on the phone ✅
 3. Transaction cards (category + reason) and Sync button ✅
-4. Dashboard from the sheet data, cached on the phone
+4. Dashboard from the sheet data, cached on the phone ✅
