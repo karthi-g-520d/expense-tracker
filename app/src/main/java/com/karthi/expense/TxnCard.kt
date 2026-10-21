@@ -15,13 +15,17 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
@@ -30,12 +34,13 @@ import androidx.compose.ui.unit.dp
 import com.karthi.expense.data.Categories
 import com.karthi.expense.data.PendingTxn
 
-/** One transaction: payee and amount, a single scrolling row of categories, and a reason box. */
+/** One transaction: payee and amount, a single scrolling row of categories, and an optional note. */
 @Composable
 fun TxnCard(t: PendingTxn, onTag: (category: String?, reason: String?) -> Unit) {
     // Local state so typing isn't interrupted when the database re-emits the list.
     var category by remember(t.id) { mutableStateOf(t.category) }
     var reason by remember(t.id) { mutableStateOf(t.reason.orEmpty()) }
+    val focus = remember { FocusRequester() }
     val isDebit = t.type == "DEBIT"
     val tagged = category != null
 
@@ -86,21 +91,32 @@ fun TxnCard(t: PendingTxn, onTag: (category: String?, reason: String?) -> Unit) 
                 }
             }
 
-            OutlinedTextField(
-                value = reason,
-                onValueChange = {
-                    reason = it
-                    onTag(category, it)
-                },
-                placeholder = { Text("Add a note (optional)") },
-                singleLine = true,
-                textStyle = MaterialTheme.typography.bodyMedium,
-                keyboardOptions = KeyboardOptions(
-                    capitalization = KeyboardCapitalization.Sentences,
-                    imeAction = ImeAction.Done,
-                ),
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp),
-            )
+            // A text field per card is the heaviest thing in the list, so it's only created
+            // once the user asks for a note (or the card already has one).
+            var editing by remember(t.id) { mutableStateOf(false) }
+            if (editing || reason.isNotEmpty()) {
+                OutlinedTextField(
+                    value = reason,
+                    onValueChange = {
+                        reason = it
+                        onTag(category, it)
+                    },
+                    placeholder = { Text("Add a note (optional)") },
+                    singleLine = true,
+                    textStyle = MaterialTheme.typography.bodyMedium,
+                    keyboardOptions = KeyboardOptions(
+                        capitalization = KeyboardCapitalization.Sentences,
+                        imeAction = ImeAction.Done,
+                    ),
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp).focusRequester(focus),
+                )
+                LaunchedEffect(editing) { if (editing && reason.isEmpty()) focus.requestFocus() }
+            } else {
+                TextButton(
+                    onClick = { editing = true },
+                    modifier = Modifier.padding(horizontal = 4.dp),
+                ) { Text("+ Add a note") }
+            }
         }
     }
 }
