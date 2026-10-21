@@ -15,6 +15,9 @@ import java.net.URLEncoder
  */
 class GoogleSheetsClient(private val auth: GoogleAuth, private val settings: SheetSettings) : SheetBackend {
 
+    /** Spreadsheet whose formats and summary formula were already repaired in this app run. */
+    @Volatile private var repairedId: String? = null
+
     override suspend fun push(txns: List<PendingTxn>): List<String> = withContext(Dispatchers.IO) {
         val id = spreadsheetId()
         val token = auth.accessToken()
@@ -24,18 +27,21 @@ class GoogleSheetsClient(private val auth: GoogleAuth, private val settings: She
         txns.filter { it.id !in existing }.forEach { t ->
             rows.put(
                 JSONArray()
-                    .put(t.id).put(t.date).put(t.type).put(t.amount.toDouble()).put(t.bank).put(t.account)
+                    .put(t.id).put(t.date).put(t.type).put(t.amount.toDouble()).put(t.bank).put(asText(t.account))
                     .put(t.counterparty.orEmpty()).put(t.category.orEmpty()).put(t.reason.orEmpty())
-                    .put(t.reference.orEmpty()).put(t.balance?.toDouble() ?: "").put(java.time.LocalDateTime.now().toString())
+                    .put(asText(t.reference)).put(t.balance?.toDouble() ?: "").put(java.time.LocalDateTime.now().toString())
             )
         }
         if (rows.length() > 0) {
             request(
                 "POST", token,
-                "$API/$id/values/${enc("$TAB!A1")}:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS",
+                // OVERWRITE fills the existing empty rows, which carry the column's date format;
+                // INSERT_ROWS would copy the header row's plain format and dates would show as numbers.
+                "$API/$id/values/${enc("$TAB!A1")}:append?valueInputOption=USER_ENTERED&insertDataOption=OVERWRITE",
                 JSONObject().put("values", rows),
             )
         }
+        repair(token, id)
         // Ones that were already in the sheet count as synced too.
         txns.map { it.id }
     }
@@ -43,14 +49,15 @@ class GoogleSheetsClient(private val auth: GoogleAuth, private val settings: She
     override suspend fun fetchAll(): SheetData = withContext(Dispatchers.IO) {
         val id = spreadsheetId()
         val token = auth.accessToken()
-        val rows = values(token, id, "$TAB!A2:L").mapNotNull { r ->
+        if (repairedId != id) repair(token, id)
+        val rows = values(token, id, "$TAB!A2:L", unformatted = true).mapNotNull { r ->
             val txnId = r.optString(0)
             if (txnId.isEmpty()) return@mapNotNull null
             SheetTxn(
                 id = txnId,
-                date = r.optString(1),
+                date = isoDate(r.opt(1)),
                 type = r.optString(2),
-                amount = r.optString(3).replace(",", "").toDoubleOrNull() ?: 0.0,
+                amount = (r.opt(3) as? Number)?.toDouble() ?: r.optString(3).replace(",", "").toDoubleOrNull() ?: 0.0,
                 bank = r.optString(4),
                 counterparty = r.optString(6).ifEmpty { null },
                 category = r.optString(7).ifEmpty { null },
@@ -95,6 +102,15 @@ class GoogleSheetsClient(private val auth: GoogleAuth, private val settings: She
         id
     }
 
+    /** Sheets returns a date cell either as text or as a serial day number (days since 1899-12-30). */
+    private fun isoDate(value: Any?): String {
+        val serial = (value as? Number)?.toLong() ?: value?.toString()?.toDoubleOrNull()?.toLong()
+        return serial?.let { SHEETS_EPOCH.plusDays(it).toString() } ?: value?.toString().orEmpty()
+    }
+
+    // A leading apostrophe keeps numbers like "041330335754" as text, so leading zeros survive.
+    private fun asText(value: String?) = value?.let { "'$it" }.orEmpty()
+
     fun linkFor(id: String) = "https://docs.google.com/spreadsheets/d/$id/edit"
 
     private fun spreadsheetId() =
@@ -102,9 +118,7 @@ class GoogleSheetsClient(private val auth: GoogleAuth, private val settings: She
 
     // Header row, date/amount formats, frozen header, and the monthly summary formula.
     private fun setUpTabs(token: String, id: String, meta: JSONObject) {
-        val sheets = meta.getJSONArray("sheets")
-        val tabId = List(sheets.length()) { sheets.getJSONObject(it).getJSONObject("properties") }
-            .first { it.getString("title") == TAB }.getInt("sheetId")
+        val tabId = tabIdFrom(meta)
 
         request(
             "PUT", token, "$API/$id/values/${enc("$TAB!A1:L1")}?valueInputOption=RAW",
@@ -114,21 +128,39 @@ class GoogleSheetsClient(private val auth: GoogleAuth, private val settings: She
             .put(JSONObject().put("updateSheetProperties", JSONObject()
                 .put("properties", JSONObject().put("sheetId", tabId).put("gridProperties", JSONObject().put("frozenRowCount", 1)))
                 .put("fields", "gridProperties.frozenRowCount")))
-            .put(numberFormat(tabId, 1, "DATE", "yyyy-mm-dd"))
-            .put(numberFormat(tabId, 3, "NUMBER", "#,##0.00"))
         request("POST", token, "$API/$id:batchUpdate", JSONObject().put("requests", requests))
+        applyColumnFormats(token, id, tabId)
         writeSummaryFormula(token, id)
     }
 
+    // Fixes sheets written by older versions (dates shown as numbers, summary formula
+    // broken by inserted rows). Safe to repeat.
+    private fun repair(token: String, id: String) {
+        applyColumnFormats(token, id, tabId(token, id))
+        writeSummaryFormula(token, id)
+        repairedId = id
+    }
+
+    private fun applyColumnFormats(token: String, id: String, tabId: Int) {
+        val requests = JSONArray()
+            .put(numberFormat(tabId, 1, "DATE", "yyyy-mm-dd"))
+            .put(numberFormat(tabId, 3, "NUMBER", "#,##0.00"))
+        request("POST", token, "$API/$id:batchUpdate", JSONObject().put("requests", requests))
+    }
+
+    private fun tabId(token: String, id: String) =
+        tabIdFrom(request("GET", token, "$API/$id?fields=sheets.properties", null))
+
+    private fun tabIdFrom(meta: JSONObject): Int {
+        val sheets = meta.getJSONArray("sheets")
+        return List(sheets.length()) { sheets.getJSONObject(it).getJSONObject("properties") }
+            .first { it.getString("title") == TAB }.getInt("sheetId")
+    }
+
     private fun writeSummaryFormula(token: String, id: String) {
-        val formula = "=QUERY({ARRAYFORMULA(IF($TAB!B2:B=\"\",,TEXT($TAB!B2:B,\"yyyy-mm\")))," +
-            "$TAB!C2:C,$TAB!D2:D,$TAB!H2:H}," +
-            "\"select Col1, Col2, Col4, sum(Col3) where Col1 is not null " +
-            "group by Col1, Col2, Col4 order by Col1 desc, Col2 desc, sum(Col3) desc " +
-            "label Col1 'Month', Col2 'Type', Col4 'Category', sum(Col3) 'Total'\",0)"
         request(
             "PUT", token, "$API/$id/values/${enc("'$SUMMARY'!A1")}?valueInputOption=USER_ENTERED",
-            JSONObject().put("values", JSONArray().put(JSONArray().put(formula))),
+            JSONObject().put("values", JSONArray().put(JSONArray().put(SUMMARY_FORMULA))),
         )
     }
 
@@ -140,8 +172,9 @@ class GoogleSheetsClient(private val auth: GoogleAuth, private val settings: She
                 .put("numberFormat", JSONObject().put("type", type).put("pattern", pattern))))
             .put("fields", "userEnteredFormat.numberFormat"))
 
-    private fun values(token: String, id: String, range: String): List<JSONArray> {
-        val res = request("GET", token, "$API/$id/values/${enc(range)}", null)
+    private fun values(token: String, id: String, range: String, unformatted: Boolean = false): List<JSONArray> {
+        val render = if (unformatted) "?valueRenderOption=UNFORMATTED_VALUE" else ""
+        val res = request("GET", token, "$API/$id/values/${enc(range)}$render", null)
         val rows = res.optJSONArray("values") ?: return emptyList()
         return List(rows.length()) { rows.getJSONArray(it) }
     }
@@ -177,6 +210,14 @@ class GoogleSheetsClient(private val auth: GoogleAuth, private val settings: She
         const val API = "https://sheets.googleapis.com/v4/spreadsheets"
         const val TAB = "Transactions"
         const val SUMMARY = "Monthly Summary"
+        // Whole-column ranges never shift when rows are inserted, and ISNUMBER skips the header
+        // row and blanks (a real date is a number underneath).
+        val SUMMARY_FORMULA = "=QUERY({ARRAYFORMULA(IF(ISNUMBER($TAB!B:B),TEXT($TAB!B:B,\"yyyy-mm\"),)), " +
+            "$TAB!C:C, $TAB!D:D, $TAB!H:H}, " +
+            "\"select Col1, Col2, Col4, sum(Col3) where Col1 is not null " +
+            "group by Col1, Col2, Col4 order by Col1 desc, Col2 desc, sum(Col3) desc " +
+            "label Col1 'Month', Col2 'Type', Col4 'Category', sum(Col3) 'Total'\", 0)"
+        val SHEETS_EPOCH: java.time.LocalDate = java.time.LocalDate.of(1899, 12, 30)
         val HEADERS = listOf(
             "id", "date", "type", "amount", "bank", "account", "counterparty",
             "category", "reason", "reference", "balance", "synced_at",
