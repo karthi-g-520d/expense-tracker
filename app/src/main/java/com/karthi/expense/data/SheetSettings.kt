@@ -19,7 +19,27 @@ class SheetSettings(context: Context) {
         get() = prefs.getString(KEY_SHEET_URL, null)
         set(value) = prefs.edit().putString(KEY_SHEET_URL, value).apply()
 
+    /** The Apps Script link and token are both set. */
     val isConfigured: Boolean get() = url.isNotBlank() && token.isNotBlank()
+
+    /** Google account the app signed in with; null when not signed in. */
+    var googleEmail: String?
+        get() = prefs.getString(KEY_GOOGLE_EMAIL, null)
+        set(value) = prefs.edit().putString(KEY_GOOGLE_EMAIL, value).apply()
+
+    /** Spreadsheet used through the Sheets API after Google sign-in. */
+    var spreadsheetId: String?
+        get() = prefs.getString(KEY_SPREADSHEET_ID, null)
+        set(value) = prefs.edit().putString(KEY_SPREADSHEET_ID, value).apply()
+
+    /** Signed in with Google and a spreadsheet chosen; this wins over the Apps Script link. */
+    val usesGoogleSignIn: Boolean get() = googleEmail != null && spreadsheetId != null
+
+    val isConnected: Boolean get() = usesGoogleSignIn || isConfigured
+
+    fun signOutGoogle() {
+        prefs.edit().remove(KEY_GOOGLE_EMAIL).remove(KEY_SPREADSHEET_ID).apply()
+    }
 
     fun save(url: String, token: String) {
         prefs.edit()
@@ -33,5 +53,7 @@ class SheetSettings(context: Context) {
         const val KEY_URL = "url"
         const val KEY_TOKEN = "token"
         const val KEY_SHEET_URL = "sheet_url"
+        const val KEY_GOOGLE_EMAIL = "google_email"
+        const val KEY_SPREADSHEET_ID = "spreadsheet_id"
     }
 }

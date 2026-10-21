@@ -1,13 +1,20 @@
 package com.karthi.expense
 
 import android.app.Application
+import android.content.Intent
+import android.content.IntentSender
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.google.android.gms.common.api.ApiException
+import com.google.android.gms.common.api.CommonStatusCodes
 import com.karthi.expense.data.AppDatabase
+import com.karthi.expense.data.GoogleAuth
+import com.karthi.expense.data.GoogleSheetsClient
 import com.karthi.expense.data.PendingTxn
+import com.karthi.expense.data.SheetBackend
 import com.karthi.expense.data.SheetClient
 import com.karthi.expense.data.SheetSettings
 import com.karthi.expense.data.SheetTxn
@@ -24,7 +31,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val sheetDao = db.sheetTxnDao()
     private val importer = SmsImporter(app, dao)
     private val settings = SheetSettings(app)
-    private val sheet = SheetClient(settings)
+    private val appsScript = SheetClient(settings)
+    private val googleAuth = GoogleAuth(app)
+    private val googleSheets = GoogleSheetsClient(googleAuth, settings)
+
+    /** Google sign-in wins when it's fully set up; otherwise the Apps Script link. */
+    private val sheet: SheetBackend get() = if (settings.usesGoogleSignIn) googleSheets else appsScript
 
     val unsynced: StateFlow<List<PendingTxn>> =
         dao.observeUnsynced().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
@@ -38,11 +50,20 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         private set
     var sheetTokenSetting by mutableStateOf(settings.token)
         private set
-    var sheetConfigured by mutableStateOf(settings.isConfigured)
+    var sheetConfigured by mutableStateOf(settings.isConnected)
         private set
     /** Link to open the spreadsheet itself; known after the first successful fetch. */
     var spreadsheetLink by mutableStateOf(settings.sheetUrl)
         private set
+    var googleEmail by mutableStateOf(settings.googleEmail)
+        private set
+    var hasSpreadsheet by mutableStateOf(settings.spreadsheetId != null)
+        private set
+    var googleBusy by mutableStateOf(false)
+        private set
+    var googleMessage by mutableStateOf<String?>(null)
+        private set
+
     var testing by mutableStateOf(false)
         private set
     var testResult by mutableStateOf<String?>(null)
@@ -116,7 +137,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Re-downloads the sheet into the on-phone cache. */
     fun refreshDashboard() {
-        if (refreshing || !settings.isConfigured) return
+        if (refreshing || !settings.isConnected) return
         refreshing = true
         viewModelScope.launch {
             refreshError = try {
@@ -136,8 +157,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         settings.save(url, token)
         sheetUrlSetting = settings.url
         sheetTokenSetting = settings.token
-        sheetConfigured = settings.isConfigured
-        spreadsheetLink = null
+        sheetConfigured = settings.isConnected
+        if (!settings.usesGoogleSignIn) spreadsheetLink = null
         testResult = null
     }
 
@@ -147,7 +168,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         testing = true
         viewModelScope.launch {
             testResult = try {
-                val data = sheet.fetchAll()
+                val data = appsScript.fetchAll()
                 rememberSpreadsheetLink(data.sheetUrl)
                 "✅ Connected · ${data.rows.size} rows in the sheet"
             } catch (e: Exception) {
@@ -162,6 +183,93 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         if (link != null) {
             settings.sheetUrl = link
             spreadsheetLink = link
+        }
+    }
+
+    /** Starts Google sign-in; [launch] shows Google's consent screen when one is needed. */
+    fun startGoogleSignIn(launch: (IntentSender) -> Unit) = google {
+        val result = googleAuth.authorize()
+        val pending = result.pendingIntent
+        if (result.hasResolution() && pending != null) {
+            launch(pending.intentSender)
+        } else {
+            onAuthorized(result.accessToken)
+        }
+    }
+
+    /** Called with what Google's consent screen returned. */
+    fun onGoogleSignInResult(data: Intent?) = google {
+        onAuthorized(googleAuth.resultFromIntent(data).accessToken)
+    }
+
+    fun onGoogleSignInCancelled() {
+        googleMessage = "Sign-in cancelled"
+    }
+
+    fun createSpreadsheet() = google {
+        useSpreadsheetId(googleSheets.createSpreadsheet())
+        googleMessage = "Created \"Expense Tracker\" in your Google Drive"
+    }
+
+    fun useExistingSpreadsheet(link: String) = google {
+        useSpreadsheetId(googleSheets.useSpreadsheet(link))
+        googleMessage = "Using that spreadsheet"
+    }
+
+    /** Keeps the Google account but lets the user pick a different spreadsheet. */
+    fun changeSpreadsheet() {
+        settings.spreadsheetId = null
+        syncGoogleState()
+        spreadsheetLink = null
+    }
+
+    fun signOutGoogle() {
+        settings.signOutGoogle()
+        syncGoogleState()
+        spreadsheetLink = null
+        googleMessage = null
+    }
+
+    private suspend fun onAuthorized(accessToken: String?) {
+        val token = accessToken ?: error("Google didn't return an access token")
+        settings.googleEmail = googleAuth.email(token)
+        syncGoogleState()
+        googleMessage = if (hasSpreadsheet) null else "Signed in. Now create a spreadsheet or paste a link to one."
+    }
+
+    private fun useSpreadsheetId(id: String) {
+        settings.spreadsheetId = id
+        syncGoogleState()
+        rememberSpreadsheetLink(googleSheets.linkFor(id))
+        refreshDashboard()
+    }
+
+    private fun syncGoogleState() {
+        googleEmail = settings.googleEmail
+        hasSpreadsheet = settings.spreadsheetId != null
+        sheetConfigured = settings.isConnected
+    }
+
+    // Runs one Google step with a busy flag and a readable error.
+    private fun google(block: suspend () -> Unit) {
+        if (googleBusy) return
+        googleBusy = true
+        viewModelScope.launch {
+            try {
+                block()
+            } catch (e: ApiException) {
+                googleMessage = when (e.statusCode) {
+                    CommonStatusCodes.DEVELOPER_ERROR ->
+                        "Google sign-in isn't set up for this app yet. Check the Android OAuth client " +
+                            "(package com.karthi.expense and the SHA-1) in Google Cloud."
+                    CommonStatusCodes.CANCELED -> "Sign-in cancelled"
+                    else -> "Google sign-in failed (code ${e.statusCode})"
+                }
+            } catch (e: Exception) {
+                googleMessage = e.message ?: "Something went wrong"
+            } finally {
+                googleBusy = false
+            }
         }
     }
 }

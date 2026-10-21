@@ -9,17 +9,25 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
 
-/** Rows in the sheet, plus the spreadsheet's own link when the script reports it. */
+/** Rows in the sheet, plus the spreadsheet's own link when known. */
 class SheetData(val rows: List<SheetTxn>, val sheetUrl: String?)
 
+/** Where synced transactions go: the Apps Script web app or the Sheets API. */
+interface SheetBackend {
+    /** Appends [txns] to the sheet, skipping ids already there. Returns the ids the sheet now holds. */
+    suspend fun push(txns: List<PendingTxn>): List<String>
+
+    /** Downloads every row in the sheet, for the dashboard. */
+    suspend fun fetchAll(): SheetData
+}
+
 /** Talks to the Apps Script web app in sheet/Code.gs. Reads the link and token at call time. */
-class SheetClient(private val settings: SheetSettings) {
+class SheetClient(private val settings: SheetSettings) : SheetBackend {
 
     private val url get() = settings.url
     private val token get() = settings.token
 
-    /** Appends [txns] to the sheet. Returns the ids the sheet confirmed. */
-    suspend fun push(txns: List<PendingTxn>): List<String> = withContext(Dispatchers.IO) {
+    override suspend fun push(txns: List<PendingTxn>): List<String> = withContext(Dispatchers.IO) {
         check(settings.isConfigured) { "Connect your Google Sheet in Settings" }
 
         val rows = JSONArray()
@@ -40,8 +48,7 @@ class SheetClient(private val settings: SheetSettings) {
         List(ids.length()) { ids.getString(it) }
     }
 
-    /** Downloads every row in the sheet, for the dashboard. */
-    suspend fun fetchAll(): SheetData = withContext(Dispatchers.IO) {
+    override suspend fun fetchAll(): SheetData = withContext(Dispatchers.IO) {
         check(settings.isConfigured) { "Connect your Google Sheet in Settings" }
 
         val res = JSONObject(get("$url?token=${URLEncoder.encode(token, "UTF-8")}"))
