@@ -20,8 +20,8 @@ android {
         applicationId = "com.karthi.expense"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1"
+        versionCode = 2
+        versionName = "0.2"
 
         buildConfigField("String", "SHEET_URL", "\"${localProps.getProperty("sheet.url", "")}\"")
         buildConfigField("String", "SHEET_TOKEN", "\"${localProps.getProperty("sheet.token", "")}\"")
@@ -72,6 +72,9 @@ dependencies {
     implementation(libs.androidx.compose.ui.tooling.preview)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(libs.androidx.profileinstaller)
+    implementation(libs.androidx.biometric)
+    implementation(libs.androidx.fragment)
+    implementation(libs.haze)
     implementation(libs.androidx.room.runtime)
     implementation(libs.androidx.room.ktx)
     ksp(libs.androidx.room.compiler)

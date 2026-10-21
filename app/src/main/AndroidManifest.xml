@@ -4,6 +4,7 @@
     <!-- Personal sideloaded app: reads bank SMS, never sends any. -->
     <uses-permission android:name="android.permission.READ_SMS" />
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.VIBRATE" />
 
     <application
         android:allowBackup="true"
