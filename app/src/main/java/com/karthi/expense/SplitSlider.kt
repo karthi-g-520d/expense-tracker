@@ -1,7 +1,6 @@
 package com.karthi.expense
 
 import android.view.HapticFeedbackConstants
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
@@ -209,7 +208,8 @@ fun SplitSlider(
             val shown = active in cuts.indices
             val anchorX = if (shown) xOf(cuts[active]) else 0f
             val capsuleWidth = with(density) { 188.dp.toPx() }
-            AnimatedVisibility(
+            // Called by its full name: inside this Column the ColumnScope overload would be picked.
+            androidx.compose.animation.AnimatedVisibility(
                 visible = shown,
                 enter = scaleIn(spring(dampingRatio = 0.8f, stiffness = Spring.StiffnessMedium), initialScale = 0.4f, transformOrigin = TransformOrigin(0.5f, 1f)) +
                     fadeIn(spring(stiffness = Spring.StiffnessMedium)),
