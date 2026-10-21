@@ -27,6 +27,17 @@ android {
         buildConfigField("String", "SHEET_TOKEN", "\"${localProps.getProperty("sheet.token", "")}\"")
     }
 
+    // Fixed debug key, committed on purpose: every CI build gets the same signature,
+    // so a new APK installs over the old one without losing the app's data.
+    signingConfigs {
+        getByName("debug") {
+            storeFile = file("debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
