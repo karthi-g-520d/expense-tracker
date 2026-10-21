@@ -1,5 +1,10 @@
 package com.karthi.expense
 
+import android.content.Context
+import android.net.Uri
+import android.provider.ContactsContract
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.expandVertically
@@ -41,6 +46,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
@@ -115,6 +121,13 @@ fun TxnCard(
         save()
     }
 
+    // The system picker hands back just the chosen contact, so no contacts permission is needed.
+    val context = LocalContext.current
+    val pickContact = rememberLauncherForActivityResult(ActivityResultContracts.PickContact()) { uri ->
+        val name = uri?.let { contactName(context, it) } ?: return@rememberLauncherForActivityResult
+        addPerson(Shares.cleanName(name))
+    }
+
     val tagged = category != null
     val highlight by animateColorAsState(
         if (tagged) MaterialTheme.colorScheme.primary.copy(alpha = 0.55f) else Color.Transparent,
@@ -184,6 +197,7 @@ fun TxnCard(
                         .filter { s -> people.none { it.name.equals(s, ignoreCase = true) } }
                         .take(6),
                     onAdd = ::addPerson,
+                    onPickContact = { pickContact.launch(null) },
                     onChange = { i, p ->
                         if (p.amount != people[i].amount) autoEqual = false
                         people[i] = p
@@ -254,6 +268,7 @@ private fun SplitEditor(
     people: List<PersonShare>,
     suggestions: List<String>,
     onAdd: (String) -> Unit,
+    onPickContact: () -> Unit,
     onChange: (Int, PersonShare) -> Unit,
     onRemove: (Int) -> Unit,
     onSplitEqually: () -> Unit,
@@ -290,8 +305,9 @@ private fun SplitEditor(
         }
 
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            CategoryChip("📇 Contacts", selected = false, onClick = onPickContact)
             suggestions.forEach { name -> CategoryChip("+ $name", selected = false) { onAdd(name) } }
-            CategoryChip("+ Someone new", selected = false) { onAdd("") }
+            CategoryChip("+ Type a name", selected = false) { onAdd("") }
         }
 
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -311,6 +327,13 @@ private fun SplitEditor(
         }
     }
 }
+
+private fun contactName(context: Context, uri: Uri): String? =
+    runCatching {
+        context.contentResolver.query(uri, arrayOf(ContactsContract.Contacts.DISPLAY_NAME), null, null, null)?.use { c ->
+            if (c.moveToFirst()) c.getString(0) else null
+        }
+    }.getOrNull()?.takeIf { it.isNotBlank() }
 
 /** Capsule that fills with the accent colour when picked; shrinks a touch while pressed. */
 @Composable
