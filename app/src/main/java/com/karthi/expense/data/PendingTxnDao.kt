@@ -16,8 +16,8 @@ interface PendingTxnDao {
     @Query("SELECT * FROM pending_txn WHERE syncedAt IS NULL ORDER BY smsTime DESC")
     fun observeUnsynced(): Flow<List<PendingTxn>>
 
-    @Query("UPDATE pending_txn SET category = :category, reason = :reason, shares = :shares WHERE id = :id")
-    suspend fun updateTag(id: String, category: String?, reason: String?, shares: String?)
+    @Query("UPDATE pending_txn SET category = :category, reason = :reason, shares = :shares, parts = :parts WHERE id = :id")
+    suspend fun updateTag(id: String, category: String?, reason: String?, shares: String?, parts: String?)
 
     @Query("SELECT * FROM pending_txn WHERE syncedAt IS NULL AND category IS NOT NULL")
     suspend fun taggedUnsynced(): List<PendingTxn>

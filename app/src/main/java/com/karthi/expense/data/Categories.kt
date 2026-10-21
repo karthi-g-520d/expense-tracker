@@ -77,7 +77,7 @@ object Categories {
     /** Names are trimmed and can't repeat within a list (ignoring case). Returns false if refused. */
     fun add(type: String, name: String, icon: String): Boolean {
         val list = forType(type)
-        val clean = name.trim()
+        val clean = Shares.cleanName(name)
         if (clean.isEmpty() || list.any { it.name.equals(clean, ignoreCase = true) }) return false
         // New ones go before "Other", which reads best last.
         val other = list.indexOfFirst { it.name == "Other" }
@@ -88,7 +88,7 @@ object Categories {
 
     fun update(type: String, index: Int, name: String, icon: String): Boolean {
         val list = forType(type)
-        val clean = name.trim()
+        val clean = Shares.cleanName(name)
         if (clean.isEmpty() || list.withIndex().any { (i, c) -> i != index && c.name.equals(clean, ignoreCase = true) }) return false
         list[index] = Category(clean, icon.trim())
         save()

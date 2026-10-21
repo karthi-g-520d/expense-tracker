@@ -7,7 +7,7 @@ import androidx.room.RoomDatabase
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
-@Database(entities = [PendingTxn::class, SheetTxn::class], version = 3, exportSchema = false)
+@Database(entities = [PendingTxn::class, SheetTxn::class], version = 4, exportSchema = false)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun pendingTxnDao(): PendingTxnDao
     abstract fun sheetTxnDao(): SheetTxnDao
@@ -34,9 +34,16 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        // v4 adds the split across categories for transactions not yet synced.
+        private val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `pending_txn` ADD COLUMN `parts` TEXT")
+            }
+        }
+
         fun get(context: Context): AppDatabase = instance ?: synchronized(this) {
             instance ?: Room.databaseBuilder(context.applicationContext, AppDatabase::class.java, "expenses.db")
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
                 .build()
                 .also { instance = it }
         }

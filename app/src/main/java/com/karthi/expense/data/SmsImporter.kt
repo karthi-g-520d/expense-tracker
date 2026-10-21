@@ -62,8 +62,8 @@ class SmsImporter(private val context: Context, private val dao: PendingTxnDao) 
         for ((debitId, creditId) in SelfTransfer.match(legs)) {
             val debit = untagged.getValue(debitId)
             val credit = untagged.getValue(creditId)
-            dao.updateTag(debit.id, Categories.SELF_TRANSFER, "To ${credit.bank} ••${credit.account}", null)
-            dao.updateTag(credit.id, Categories.SELF_TRANSFER, "From ${debit.bank} ••${debit.account}", null)
+            dao.updateTag(debit.id, Categories.SELF_TRANSFER, "To ${credit.bank} ••${credit.account}", null, null)
+            dao.updateTag(credit.id, Categories.SELF_TRANSFER, "From ${debit.bank} ••${debit.account}", null, null)
         }
     }
 

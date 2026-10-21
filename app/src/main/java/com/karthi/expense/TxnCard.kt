@@ -10,6 +10,8 @@ import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -36,6 +38,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -46,6 +49,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -54,26 +58,40 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.karthi.expense.core.Shares
+import com.karthi.expense.core.SplitBar
 import com.karthi.expense.data.Categories
 import com.karthi.expense.data.PendingTxn
+import kotlinx.coroutines.delay
 import java.math.BigDecimal
 
 /** One person's part of a transaction while it's being edited; amount stays text so typing isn't fought. */
 private data class PersonShare(val name: String, val amount: String)
 
 /**
- * One transaction: payee and amount, a scrolling row of categories, an optional note, and an
- * optional split saying which part belongs to other people.
+ * One transaction: payee and amount, a scrolling row of categories (pick several to split your
+ * part between them), an optional note, and an optional split saying which part belongs to other people.
  */
 @Composable
 fun TxnCard(
     t: PendingTxn,
     knownPeople: List<String>,
     modifier: Modifier = Modifier,
-    onTag: (category: String?, reason: String?, shares: String?) -> Unit,
+    onTag: (category: String?, reason: String?, shares: String?, parts: String?) -> Unit,
 ) {
     // Local state so typing isn't interrupted when the database re-emits the list.
     var category by remember(t.id) { mutableStateOf(t.category) }
+    // Picked categories, in the order of the Settings list; two or more split your part between them.
+    val savedParts = remember(t.id) { Shares.parse(t.parts) }
+    val selected = remember(t.id) {
+        mutableStateListOf<String>().apply {
+            if (savedParts.size >= 2) addAll(savedParts.keys) else t.category?.takeIf { it != Categories.NOT_MINE }?.let { add(it) }
+        }
+    }
+    val partAmounts = remember(t.id) {
+        mutableStateListOf<BigDecimal>().apply { if (savedParts.size >= 2) addAll(savedParts.values) }
+    }
+    // Bumped by slider drags; the save waits until the handle settles instead of writing every step.
+    var sliderEdits by remember(t.id) { mutableIntStateOf(0) }
     var reason by remember(t.id) { mutableStateOf(t.reason.orEmpty()) }
     val people = remember(t.id) {
         mutableStateListOf<PersonShare>().apply {
@@ -100,13 +118,41 @@ fun TxnCard(
     fun save() {
         val current = shareMap()
         val sharesText = Shares.format(current)
-        // The whole amount is someone else's: no category of yours to pick.
-        category = when {
-            isAllTheirs(current) -> Categories.NOT_MINE
-            category == Categories.NOT_MINE -> null
-            else -> category
+        val allTheirsNow = isAllTheirs(current)
+        val myPart = Shares.myPart(total, current).max(BigDecimal.ZERO)
+        // Keep the category parts adding up to your part as people's shares change.
+        if (selected.size < 2) {
+            partAmounts.clear()
+        } else if (partAmounts.size != selected.size) {
+            partAmounts.clear()
+            partAmounts.addAll(SplitBar.equal(myPart, selected.size))
+        } else if (partAmounts.fold(BigDecimal.ZERO, BigDecimal::add).compareTo(myPart) != 0) {
+            val fitted = SplitBar.rescale(partAmounts.toList(), myPart)
+            partAmounts.clear()
+            partAmounts.addAll(fitted)
         }
-        onTag(category, reason, sharesText)
+        // The whole amount is someone else's: no category of yours to pick.
+        category = if (allTheirsNow) Categories.NOT_MINE else selected.firstOrNull()
+        val partsText = if (allTheirsNow || selected.size < 2) null
+        else selected.zip(partAmounts).joinToString(";") { (name, amount) -> "$name:${amount.stripTrailingZeros().toPlainString()}" }
+        onTag(category, reason, sharesText, partsText)
+    }
+
+    LaunchedEffect(sliderEdits) {
+        if (sliderEdits == 0) return@LaunchedEffect
+        delay(300)
+        save()
+    }
+
+    fun toggle(name: String) {
+        if (!selected.remove(name)) selected.add(name)
+        val order = Categories.forType(t.type).map { it.name }
+        val sorted = selected.sortedBy { order.indexOf(it).let { i -> if (i < 0) Int.MAX_VALUE else i } }
+        selected.clear()
+        selected.addAll(sorted)
+        // A new set of categories starts from an equal split.
+        partAmounts.clear()
+        save()
     }
 
     fun splitEqually() {
@@ -174,11 +220,35 @@ fun TxnCard(
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
                     Categories.forType(t.type).forEach { c ->
-                        CategoryChip(Categories.label(c.name), selected = category == c.name) {
-                            category = if (category == c.name) null else c.name
-                            save()
-                        }
+                        CategoryChip(Categories.label(c.name), selected = c.name in selected) { toggle(c.name) }
                     }
+                }
+            }
+
+            // Two or more categories: a bar to share your part between them.
+            AnimatedVisibility(
+                visible = selected.size >= 2 && !allTheirs && partAmounts.size == selected.size,
+                enter = expandVertically(fluidSpring()) +
+                    scaleIn(fluidSpring(), initialScale = 0.92f, transformOrigin = TransformOrigin(0.5f, 0f)) + fadeIn(fluidSpring()),
+                exit = shrinkVertically(fluidSpring()) +
+                    scaleOut(fluidSpring(), targetScale = 0.92f, transformOrigin = TransformOrigin(0.5f, 0f)) + fadeOut(fluidSpring()),
+            ) {
+                Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(
+                        "Split ${if (shareMap.isEmpty()) "" else "your "}₹${mine.max(BigDecimal.ZERO).stripTrailingZeros().toPlainString()} · hold a handle to fine-tune",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    SplitSlider(
+                        total = mine.max(BigDecimal.ZERO),
+                        labels = selected.map(Categories::label),
+                        amounts = partAmounts.toList(),
+                        onChange = { amounts ->
+                            partAmounts.clear()
+                            partAmounts.addAll(amounts)
+                            sliderEdits++
+                        },
+                    )
                 }
             }
 
@@ -218,6 +288,14 @@ fun TxnCard(
                         people[0] = people[0].copy(amount = t.amount)
                         autoEqual = false
                         save()
+                    },
+                    onSlide = { amounts ->
+                        // amounts[0] is yours; the rest follow the people in order.
+                        amounts.drop(1).forEachIndexed { i, a ->
+                            people[i] = people[i].copy(amount = a.stripTrailingZeros().toPlainString())
+                        }
+                        autoEqual = false
+                        sliderEdits++
                     },
                 )
             }
@@ -273,6 +351,7 @@ private fun SplitEditor(
     onRemove: (Int) -> Unit,
     onSplitEqually: () -> Unit,
     onAllTheirs: () -> Unit,
+    onSlide: (List<BigDecimal>) -> Unit,
 ) {
     Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(
@@ -302,6 +381,17 @@ private fun SplitEditor(
                 )
                 IconButton(onClick = { onRemove(i) }) { Icon(Icons.Filled.Close, contentDescription = "Remove") }
             }
+        }
+
+        // You first, then each person: drag the handles between you to share the amount.
+        if (people.isNotEmpty() && mine.signum() >= 0) {
+            SplitSlider(
+                total = total,
+                labels = listOf("You") + people.mapIndexed { i, p -> p.name.ifBlank { "Person ${i + 1}" } },
+                amounts = listOf(mine) + people.map { it.amount.toBigDecimalOrNull() ?: BigDecimal.ZERO },
+                onChange = onSlide,
+                modifier = Modifier.padding(top = 4.dp),
+            )
         }
 
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {

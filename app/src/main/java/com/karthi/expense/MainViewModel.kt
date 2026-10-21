@@ -123,13 +123,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun updateCategory(type: String, index: Int, name: String, icon: String): Boolean {
         val old = Categories.forType(type)[index].name
         if (!Categories.update(type, index, name, icon)) return false
-        val new = name.trim()
+        val new = Shares.cleanName(name)
         if (new != old) viewModelScope.launch { dao.renameUnsynced(type, old, new) }
         return true
     }
 
-    fun tag(id: String, category: String?, reason: String?, shares: String?) {
-        viewModelScope.launch { dao.updateTag(id, category, reason?.ifBlank { null }, shares) }
+    fun tag(id: String, category: String?, reason: String?, shares: String?, parts: String?) {
+        viewModelScope.launch { dao.updateTag(id, category, reason?.ifBlank { null }, shares, parts) }
     }
 
     /** Names used in earlier splits, most frequent first, for the name suggestions on cards. */
