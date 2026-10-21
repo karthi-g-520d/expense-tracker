@@ -203,7 +203,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun onGoogleSignInCancelled() {
-        googleMessage = "Sign-in cancelled"
+        googleMessage = "Sign-in cancelled before Google returned a result. Try again; if it keeps happening, " +
+            "check the Google Cloud setup (Sheets API, consent screen, Android client SHA-1)."
     }
 
     fun createSpreadsheet() = google {
@@ -262,8 +263,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     CommonStatusCodes.DEVELOPER_ERROR ->
                         "Google sign-in isn't set up for this app yet. Check the Android OAuth client " +
                             "(package com.karthi.expense and the SHA-1) in Google Cloud."
-                    CommonStatusCodes.CANCELED -> "Sign-in cancelled"
-                    else -> "Google sign-in failed (code ${e.statusCode})"
+                    CommonStatusCodes.CANCELED ->
+                        "Sign-in was cancelled. If you didn't cancel it, Google may have rejected the app: in Google " +
+                            "Cloud check that the Sheets API is enabled, the consent screen is In production (or your " +
+                            "email is a test user), and the Android client's package and SHA-1 match."
+                    else -> "Google sign-in failed (code ${e.statusCode}): ${e.status.statusMessage ?: e.message}"
                 }
             } catch (e: Exception) {
                 googleMessage = e.message ?: "Something went wrong"
