@@ -143,7 +143,7 @@ class GoogleSheetsClient(
         .put(t.counterparty.orEmpty()).put(t.category.orEmpty()).put(t.reason.orEmpty())
         .put(asText(t.reference)).put(t.balance?.toDouble() ?: "").put(syncedAt)
         .put(t.shares.orEmpty())
-        .put(Shares.myPart(BigDecimal(t.amount), Shares.parse(t.shares)).toDouble())
+        .put(Categories.myAmount(BigDecimal(t.amount), t.shares, t.category).toDouble())
 
     // Fixes sheets written by older versions (dates shown as numbers, summary formula
     // broken by inserted rows) and tabs whose rows got moved. Safe to repeat.

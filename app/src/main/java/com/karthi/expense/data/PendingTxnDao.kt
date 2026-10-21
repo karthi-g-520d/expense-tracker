@@ -22,6 +22,9 @@ interface PendingTxnDao {
     @Query("SELECT * FROM pending_txn WHERE syncedAt IS NULL AND category IS NOT NULL")
     suspend fun taggedUnsynced(): List<PendingTxn>
 
+    @Query("SELECT * FROM pending_txn WHERE syncedAt IS NULL AND category IS NULL")
+    suspend fun untaggedUnsynced(): List<PendingTxn>
+
     @Query("SELECT * FROM pending_txn WHERE syncedAt IS NOT NULL")
     suspend fun synced(): List<PendingTxn>
 
