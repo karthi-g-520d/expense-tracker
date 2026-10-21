@@ -20,8 +20,8 @@ android {
         applicationId = "com.karthi.expense"
         minSdk = 26
         targetSdk = 35
-        versionCode = 4
-        versionName = "0.4"
+        versionCode = 5
+        versionName = "0.5"
 
         buildConfigField("String", "SHEET_URL", "\"${localProps.getProperty("sheet.url", "")}\"")
         buildConfigField("String", "SHEET_TOKEN", "\"${localProps.getProperty("sheet.token", "")}\"")

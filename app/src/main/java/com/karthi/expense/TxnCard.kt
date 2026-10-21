@@ -174,8 +174,8 @@ fun TxnCard(
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
                     Categories.forType(t.type).forEach { c ->
-                        CategoryChip(Categories.label(c), selected = category == c) {
-                            category = if (category == c) null else c
+                        CategoryChip(Categories.label(c.name), selected = category == c.name) {
+                            category = if (category == c.name) null else c.name
                             save()
                         }
                     }
@@ -337,7 +337,7 @@ private fun contactName(context: Context, uri: Uri): String? =
 
 /** Capsule that fills with the accent colour when picked; shrinks a touch while pressed. */
 @Composable
-private fun CategoryChip(label: String, selected: Boolean, onClick: () -> Unit) {
+internal fun CategoryChip(label: String, selected: Boolean, onClick: () -> Unit) {
     val bg by animateColorAsState(
         if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
         fluidSpring(),
