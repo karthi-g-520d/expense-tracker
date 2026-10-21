@@ -9,7 +9,7 @@
 const SHEET = 'Transactions';
 const SUMMARY = 'Monthly Summary';
 const HEADERS = ['id', 'date', 'type', 'amount', 'bank', 'account', 'counterparty',
-                 'category', 'reason', 'reference', 'balance', 'synced_at'];
+                 'category', 'reason', 'reference', 'balance', 'synced_at', 'shares', 'my_amount'];
 
 /** Run once from the editor: creates the tabs and a random token. */
 function setup() {
@@ -19,14 +19,16 @@ function setup() {
   sheet.setFrozenRows(1);
   sheet.getRange('B:B').setNumberFormat('yyyy-mm-dd');
   sheet.getRange('D:D').setNumberFormat('#,##0.00');
+  sheet.getRange('N:N').setNumberFormat('#,##0.00');
 
   // Spending per month and category, newest month first, like a usage statement.
+  // Uses your own part (my_amount) so money spent for friends isn't counted as yours.
   const summary = ss.getSheetByName(SUMMARY) || ss.insertSheet(SUMMARY);
   summary.clear();
   summary.getRange('A1').setFormula(
     "=QUERY({ARRAYFORMULA(IF(ISNUMBER(" + SHEET + "!B:B),TEXT(" + SHEET + "!B:B,\"yyyy-mm\"),)), " +
-    SHEET + "!C:C, " + SHEET + "!D:D, " + SHEET + "!H:H}, " +
-    "\"select Col1, Col2, Col4, sum(Col3) where Col1 is not null " +
+    SHEET + "!C:C, ARRAYFORMULA(IF(" + SHEET + "!N:N=\"\"," + SHEET + "!D:D," + SHEET + "!N:N)), " + SHEET + "!H:H}, " +
+    "\"select Col1, Col2, Col4, sum(Col3) where Col1 is not null and Col3 <> 0 " +
     "group by Col1, Col2, Col4 order by Col1 desc, Col2 desc, sum(Col3) desc " +
     "label Col1 'Month', Col2 'Type', Col4 'Category', sum(Col3) 'Total'\", 0)");
 
@@ -50,7 +52,8 @@ function doPost(e) {
       .filter(r => !existing.has(r.id))
       .map(r => [r.id, toDate(r.date), r.type, Number(r.amount), r.bank, r.account,
                  r.counterparty || '', r.category || '', r.reason || '', r.reference || '',
-                 r.balance == null ? '' : Number(r.balance), now]);
+                 r.balance == null ? '' : Number(r.balance), now,
+                 r.shares || '', r.my_amount == null ? Number(r.amount) : Number(r.my_amount)]);
     if (rows.length) sheet.getRange(last + 1, 1, rows.length, HEADERS.length).setValues(rows);
     // The app marks every sent id as synced, including ones that were already in the sheet.
     return json({ added: rows.length, ids: (body.rows || []).map(r => r.id) });

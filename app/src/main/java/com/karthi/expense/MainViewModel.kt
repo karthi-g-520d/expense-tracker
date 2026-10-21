@@ -11,7 +11,9 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.google.android.gms.common.api.ApiException
 import com.google.android.gms.common.api.CommonStatusCodes
+import com.karthi.expense.core.Shares
 import com.karthi.expense.data.AppDatabase
+import com.karthi.expense.data.Categories
 import com.karthi.expense.data.GoogleAuth
 import com.karthi.expense.data.GoogleSheetsClient
 import com.karthi.expense.data.PendingTxn
@@ -20,8 +22,10 @@ import com.karthi.expense.data.SheetClient
 import com.karthi.expense.data.SheetSettings
 import com.karthi.expense.data.SheetTxn
 import com.karthi.expense.data.SmsImporter
+import java.math.BigDecimal
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -115,8 +119,57 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         importSms()
     }
 
-    fun tag(id: String, category: String?, reason: String?) {
-        viewModelScope.launch { dao.updateTag(id, category, reason?.ifBlank { null }) }
+    fun tag(id: String, category: String?, reason: String?, shares: String?) {
+        viewModelScope.launch { dao.updateTag(id, category, reason?.ifBlank { null }, shares) }
+    }
+
+    /** Names used in earlier splits, most frequent first, for the name suggestions on cards. */
+    val knownPeople: StateFlow<List<String>> =
+        combine(sheetRows, unsynced) { rows, pending ->
+            (rows.map { it.shares } + pending.map { it.shares })
+                .flatMap { Shares.parse(it).keys }
+                .groupBy { it.lowercase() }.values
+                .sortedByDescending { it.size }
+                .map { it.first() }
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /** Result of the last Settle, shown on the People card. */
+    var peopleMessage by mutableStateOf<String?>(null)
+        private set
+
+    /**
+     * Closes a person's balance without money moving: what they owe becomes your expense,
+     * what you hold of theirs becomes your income. Written to the sheet as its own row.
+     */
+    fun settle(person: String, balance: BigDecimal) {
+        if (balance.signum() == 0) return
+        viewModelScope.launch {
+            peopleMessage = try {
+                val now = System.currentTimeMillis()
+                val owedToMe = balance.signum() > 0
+                val row = PendingTxn(
+                    id = "SETTLE-${Shares.cleanName(person).replace(' ', '_')}-$now",
+                    bank = "",
+                    type = if (owedToMe) "DEBIT" else "CREDIT",
+                    amount = "0",
+                    account = "",
+                    counterparty = person,
+                    date = java.time.LocalDate.now().toString(),
+                    reference = null,
+                    balance = null,
+                    smsTime = now,
+                    category = Categories.SETTLED,
+                    reason = if (owedToMe) "Let go what $person owed" else "Kept what was left of $person's money",
+                    // A negative share brings the balance to zero and leaves the difference as your own.
+                    shares = Shares.format(mapOf(person to balance.abs().negate())),
+                )
+                sheet.push(listOf(row))
+                refreshDashboard()
+                "Settled with $person"
+            } catch (e: Exception) {
+                "Couldn't settle: ${e.message}"
+            }
+        }
     }
 
     /** Sends every transaction that has a category; untagged ones stay on the phone. */

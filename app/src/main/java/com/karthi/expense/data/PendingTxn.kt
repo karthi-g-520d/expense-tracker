@@ -26,6 +26,8 @@ data class PendingTxn(
     val category: String? = null,
     val reason: String? = null,
     val syncedAt: Long? = null,
+    /** Other people's parts of this transaction, e.g. "Arun:400;Bala:400". See [com.karthi.expense.core.Shares]. */
+    val shares: String? = null,
 ) {
     companion object {
         fun from(t: ParsedTxn, smsTime: Long) = PendingTxn(

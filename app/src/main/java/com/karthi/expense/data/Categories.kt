@@ -8,11 +8,17 @@ object Categories {
     )
     val credit = listOf("Salary", "Refund", "Interest", "Transfer", "Other")
 
+    /** Set automatically when the whole amount belongs to other people (see Shares). */
+    const val NOT_MINE = "Not mine"
+
+    /** Rows written by Settle: the leftover of a person's balance, counted as your own. */
+    const val SETTLED = "Settled"
+
     private val icons = mapOf(
         "Food" to "🍔", "Groceries" to "🛒", "Rent" to "🏠", "Bills" to "💡", "Fuel" to "⛽",
         "Travel" to "🚌", "Shopping" to "🛍️", "Movie" to "🎬", "Health" to "💊",
         "Investment" to "📈", "Transfer" to "🔁", "Other" to "📦",
-        "Salary" to "💼", "Refund" to "↩️", "Interest" to "🏦",
+        "Salary" to "💼", "Refund" to "↩️", "Interest" to "🏦", NOT_MINE to "🤝", SETTLED to "✅",
     )
 
     fun forType(type: String) = if (type == "CREDIT") credit else debit
