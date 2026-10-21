@@ -10,6 +10,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -29,7 +30,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.karthi.expense.data.PendingTxn
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -62,6 +62,7 @@ private fun MainScreen(vm: MainViewModel = viewModel()) {
     }
 
     val txns by vm.unsynced.collectAsState()
+    val taggedCount = txns.count { it.category != null }
 
     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         if (!hasSmsPermission) {
@@ -79,18 +80,19 @@ private fun MainScreen(vm: MainViewModel = viewModel()) {
             style = MaterialTheme.typography.titleMedium,
         )
 
-        // Plain list for now; step 3 turns these into cards with category and reason.
-        LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            items(txns, key = { it.id }) { TxnRow(it) }
+        Button(
+            onClick = vm::sync,
+            enabled = taggedCount > 0 && !vm.syncing,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text(if (vm.syncing) "Syncing…" else "Sync $taggedCount of ${txns.size} to Google Sheet")
         }
-    }
-}
+        vm.syncMessage?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
 
-@Composable
-private fun TxnRow(t: PendingTxn) {
-    val sign = if (t.type == "DEBIT") "−" else "+"
-    Column {
-        Text("$sign ₹${t.amount}  ${t.counterparty ?: ""}", style = MaterialTheme.typography.bodyLarge)
-        Text("${t.date} · ${t.bank} ${t.account}", style = MaterialTheme.typography.bodySmall)
+        LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            items(txns, key = { it.id }) { t ->
+                TxnCard(t) { category, reason -> vm.tag(t.id, category, reason) }
+            }
+        }
     }
 }
