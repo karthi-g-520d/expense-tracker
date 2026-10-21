@@ -9,6 +9,7 @@ import androidx.lifecycle.viewModelScope
 import com.karthi.expense.data.AppDatabase
 import com.karthi.expense.data.PendingTxn
 import com.karthi.expense.data.SheetClient
+import com.karthi.expense.data.SheetTxn
 import com.karthi.expense.data.SmsImporter
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -17,12 +18,25 @@ import kotlinx.coroutines.launch
 
 class MainViewModel(app: Application) : AndroidViewModel(app) {
 
-    private val dao = AppDatabase.get(app).pendingTxnDao()
+    private val db = AppDatabase.get(app)
+    private val dao = db.pendingTxnDao()
+    private val sheetDao = db.sheetTxnDao()
     private val importer = SmsImporter(app, dao)
     private val sheet = SheetClient()
 
     val unsynced: StateFlow<List<PendingTxn>> =
         dao.observeUnsynced().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /** Cached copy of the sheet, shown on the dashboard even when offline. */
+    val sheetRows: StateFlow<List<SheetTxn>> =
+        sheetDao.observeAll().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    var refreshing by mutableStateOf(false)
+        private set
+
+    /** Error from the last dashboard refresh, if it failed. */
+    var refreshError by mutableStateOf<String?>(null)
+        private set
 
     /** How many new transactions the last import found; null until the first import finishes. */
     var lastImportCount by mutableStateOf<Int?>(null)
@@ -66,12 +80,29 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 } else {
                     val ids = sheet.push(tagged)
                     dao.markSynced(ids, System.currentTimeMillis())
+                    refreshDashboard()
                     "Synced ${ids.size} transaction(s)"
                 }
             } catch (e: Exception) {
                 "Sync failed: ${e.message}"
             } finally {
                 syncing = false
+            }
+        }
+    }
+
+    /** Re-downloads the sheet into the on-phone cache. */
+    fun refreshDashboard() {
+        if (refreshing) return
+        refreshing = true
+        viewModelScope.launch {
+            refreshError = try {
+                sheetDao.replaceAll(sheet.fetchAll())
+                null
+            } catch (e: Exception) {
+                "Couldn't refresh from the sheet: ${e.message}"
+            } finally {
+                refreshing = false
             }
         }
     }

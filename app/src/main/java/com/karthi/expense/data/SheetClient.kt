@@ -8,6 +8,7 @@ import org.json.JSONObject
 import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
+import java.net.URLEncoder
 
 /** Talks to the Apps Script web app in sheet/Code.gs. */
 class SheetClient(
@@ -35,6 +36,28 @@ class SheetClient(
         if (res.has("error")) throw IOException("Sheet error: ${res.getString("error")}")
         val ids = res.getJSONArray("ids")
         List(ids.length()) { ids.getString(it) }
+    }
+
+    /** Downloads every row in the sheet, for the dashboard. */
+    suspend fun fetchAll(): List<SheetTxn> = withContext(Dispatchers.IO) {
+        check(url.isNotEmpty() && token.isNotEmpty()) { "Add sheet.url and sheet.token to local.properties" }
+
+        val res = JSONObject(get("$url?token=${URLEncoder.encode(token, "UTF-8")}"))
+        if (res.has("error")) throw IOException("Sheet error: ${res.getString("error")}")
+        val rows = res.getJSONArray("rows")
+        List(rows.length()) { i ->
+            val r = rows.getJSONObject(i)
+            SheetTxn(
+                id = r.getString("id"),
+                date = r.getString("date"),
+                type = r.getString("type"),
+                amount = r.optDouble("amount", 0.0),
+                bank = r.optString("bank"),
+                counterparty = r.optString("counterparty").ifEmpty { null },
+                category = r.optString("category").ifEmpty { null },
+                reason = r.optString("reason").ifEmpty { null },
+            )
+        }
     }
 
     // Apps Script answers a POST with a 302 to a URL that must be fetched with GET.
