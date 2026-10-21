@@ -1,6 +1,5 @@
 package com.karthi.expense.data
 
-import com.karthi.expense.BuildConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -10,15 +9,18 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
 
-/** Talks to the Apps Script web app in sheet/Code.gs. */
-class SheetClient(
-    private val url: String = BuildConfig.SHEET_URL,
-    private val token: String = BuildConfig.SHEET_TOKEN,
-) {
+/** Rows in the sheet, plus the spreadsheet's own link when the script reports it. */
+class SheetData(val rows: List<SheetTxn>, val sheetUrl: String?)
+
+/** Talks to the Apps Script web app in sheet/Code.gs. Reads the link and token at call time. */
+class SheetClient(private val settings: SheetSettings) {
+
+    private val url get() = settings.url
+    private val token get() = settings.token
 
     /** Appends [txns] to the sheet. Returns the ids the sheet confirmed. */
     suspend fun push(txns: List<PendingTxn>): List<String> = withContext(Dispatchers.IO) {
-        check(url.isNotEmpty() && token.isNotEmpty()) { "Add sheet.url and sheet.token to local.properties" }
+        check(settings.isConfigured) { "Connect your Google Sheet in Settings" }
 
         val rows = JSONArray()
         txns.forEach { t ->
@@ -39,13 +41,13 @@ class SheetClient(
     }
 
     /** Downloads every row in the sheet, for the dashboard. */
-    suspend fun fetchAll(): List<SheetTxn> = withContext(Dispatchers.IO) {
-        check(url.isNotEmpty() && token.isNotEmpty()) { "Add sheet.url and sheet.token to local.properties" }
+    suspend fun fetchAll(): SheetData = withContext(Dispatchers.IO) {
+        check(settings.isConfigured) { "Connect your Google Sheet in Settings" }
 
         val res = JSONObject(get("$url?token=${URLEncoder.encode(token, "UTF-8")}"))
         if (res.has("error")) throw IOException("Sheet error: ${res.getString("error")}")
         val rows = res.getJSONArray("rows")
-        List(rows.length()) { i ->
+        val txns = List(rows.length()) { i ->
             val r = rows.getJSONObject(i)
             SheetTxn(
                 id = r.getString("id"),
@@ -58,6 +60,7 @@ class SheetClient(
                 reason = r.optString("reason").ifEmpty { null },
             )
         }
+        SheetData(txns, res.optString("sheetUrl").ifEmpty { null })
     }
 
     // Apps Script answers a POST with a 302 to a URL that must be fetched with GET.
