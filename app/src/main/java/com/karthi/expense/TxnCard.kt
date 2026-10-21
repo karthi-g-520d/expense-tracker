@@ -1,18 +1,20 @@
 package com.karthi.expense
 
-import androidx.compose.foundation.BorderStroke
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -24,8 +26,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
@@ -36,7 +40,7 @@ import com.karthi.expense.data.PendingTxn
 
 /** One transaction: payee and amount, a single scrolling row of categories, and an optional note. */
 @Composable
-fun TxnCard(t: PendingTxn, onTag: (category: String?, reason: String?) -> Unit) {
+fun TxnCard(t: PendingTxn, modifier: Modifier = Modifier, onTag: (category: String?, reason: String?) -> Unit) {
     // Local state so typing isn't interrupted when the database re-emits the list.
     var category by remember(t.id) { mutableStateOf(t.category) }
     var reason by remember(t.id) { mutableStateOf(t.reason.orEmpty()) }
@@ -44,16 +48,15 @@ fun TxnCard(t: PendingTxn, onTag: (category: String?, reason: String?) -> Unit) 
     val isDebit = t.type == "DEBIT"
     val tagged = category != null
 
-    OutlinedCard(
-        modifier = Modifier.fillMaxWidth(),
-        border = BorderStroke(
-            if (tagged) 2.dp else 1.dp,
-            if (tagged) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant,
-        ),
-        colors = CardDefaults.outlinedCardColors(containerColor = MaterialTheme.colorScheme.surface),
-    ) {
-        Column(Modifier.padding(vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+    val highlight by animateColorAsState(
+        if (tagged) MaterialTheme.colorScheme.primary.copy(alpha = 0.55f) else Color.Transparent,
+        fluidSpring(),
+        label = "tagged",
+    )
+
+    Box(modifier.fillMaxWidth().softCard(highlight = highlight)) {
+        Column(Modifier.padding(vertical = 14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text(
                         t.counterparty ?: "Unknown",
@@ -76,18 +79,14 @@ fun TxnCard(t: PendingTxn, onTag: (category: String?, reason: String?) -> Unit) 
             }
 
             Row(
-                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 14.dp),
+                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp),
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 Categories.forType(t.type).forEach { c ->
-                    FilterChip(
-                        selected = category == c,
-                        onClick = {
-                            category = if (category == c) null else c
-                            onTag(category, reason)
-                        },
-                        label = { Text(Categories.label(c)) },
-                    )
+                    CategoryChip(Categories.label(c), selected = category == c) {
+                        category = if (category == c) null else c
+                        onTag(category, reason)
+                    }
                 }
             }
 
@@ -108,7 +107,7 @@ fun TxnCard(t: PendingTxn, onTag: (category: String?, reason: String?) -> Unit) 
                         capitalization = KeyboardCapitalization.Sentences,
                         imeAction = ImeAction.Done,
                     ),
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp).focusRequester(focus),
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).focusRequester(focus),
                 )
                 LaunchedEffect(editing) { if (editing && reason.isEmpty()) focus.requestFocus() }
             } else {
@@ -119,4 +118,31 @@ fun TxnCard(t: PendingTxn, onTag: (category: String?, reason: String?) -> Unit) 
             }
         }
     }
+}
+
+/** Capsule that fills with the accent colour when picked; shrinks a touch while pressed. */
+@Composable
+private fun CategoryChip(label: String, selected: Boolean, onClick: () -> Unit) {
+    val bg by animateColorAsState(
+        if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
+        fluidSpring(),
+        label = "chip-bg",
+    )
+    val fg by animateColorAsState(
+        if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
+        fluidSpring(),
+        label = "chip-fg",
+    )
+    val interaction = remember { MutableInteractionSource() }
+    Text(
+        label,
+        style = MaterialTheme.typography.labelLarge,
+        color = fg,
+        modifier = Modifier
+            .pressScale(interaction, 0.94f)
+            .clip(CircleShape)
+            .background(bg)
+            .clickable(interaction, indication = null, onClick = onClick)
+            .padding(horizontal = 14.dp, vertical = 8.dp),
+    )
 }

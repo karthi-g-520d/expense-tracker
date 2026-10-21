@@ -4,6 +4,7 @@ import android.app.Application
 import android.content.Intent
 import android.content.IntentSender
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
@@ -90,6 +91,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     var syncMessage by mutableStateOf<String?>(null)
         private set
 
+    /** Bumped after each sync attempt that reached the sheet, so the UI can vibrate once. */
+    var syncAttempts by mutableIntStateOf(0)
+        private set
+    var lastSyncOk by mutableStateOf(false)
+        private set
+
     fun importSms() {
         if (importing) return
         importing = true
@@ -125,9 +132,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     val ids = sheet.push(tagged)
                     dao.markSynced(ids, System.currentTimeMillis())
                     refreshDashboard()
+                    lastSyncOk = true
+                    syncAttempts++
                     "Synced ${ids.size} transaction(s)"
                 }
             } catch (e: Exception) {
+                lastSyncOk = false
+                syncAttempts++
                 "Sync failed: ${e.message}"
             } finally {
                 syncing = false
