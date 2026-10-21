@@ -22,6 +22,9 @@ interface PendingTxnDao {
     @Query("SELECT * FROM pending_txn WHERE syncedAt IS NULL AND category IS NOT NULL")
     suspend fun taggedUnsynced(): List<PendingTxn>
 
+    @Query("SELECT * FROM pending_txn WHERE syncedAt IS NOT NULL")
+    suspend fun synced(): List<PendingTxn>
+
     @Query("UPDATE pending_txn SET syncedAt = :time WHERE id IN (:ids)")
     suspend fun markSynced(ids: List<String>, time: Long)
 }
