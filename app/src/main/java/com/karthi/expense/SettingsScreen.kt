@@ -55,6 +55,8 @@ fun SettingsScreen(vm: MainViewModel, contentPadding: PaddingValues) {
     ) {
         GoogleAccountCard(vm, open = { open(it) })
 
+        CategoriesCard(vm)
+
         AppLockCard()
 
         Box(Modifier.fillMaxWidth().softCard()) {

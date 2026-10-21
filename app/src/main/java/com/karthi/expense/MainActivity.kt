@@ -79,6 +79,7 @@ import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.karthi.expense.data.Categories
 import dev.chrisbanes.haze.HazeState
 import dev.chrisbanes.haze.haze
 import java.time.LocalDate
@@ -93,6 +94,7 @@ class MainActivity : FragmentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
+        Categories.init(this)
         unlockPrompt = appLock.createPrompt(this) { ok -> if (ok) locked = false }
         // Decided before the first frame, so the app's content never flashes up behind the lock.
         locked = appLock.shouldLock()

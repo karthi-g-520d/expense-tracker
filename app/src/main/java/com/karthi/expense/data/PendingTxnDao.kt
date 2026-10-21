@@ -22,6 +22,10 @@ interface PendingTxnDao {
     @Query("SELECT * FROM pending_txn WHERE syncedAt IS NULL AND category IS NOT NULL")
     suspend fun taggedUnsynced(): List<PendingTxn>
 
+    /** Carries a renamed category over to cards not yet synced. */
+    @Query("UPDATE pending_txn SET category = :new WHERE syncedAt IS NULL AND type = :type AND category = :old")
+    suspend fun renameUnsynced(type: String, old: String, new: String)
+
     @Query("SELECT * FROM pending_txn WHERE syncedAt IS NULL AND category IS NULL")
     suspend fun untaggedUnsynced(): List<PendingTxn>
 
