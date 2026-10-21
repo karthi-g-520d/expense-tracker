@@ -128,7 +128,8 @@ fun SettingsScreen(vm: MainViewModel) {
 @Composable
 private fun GoogleAccountCard(vm: MainViewModel, open: (String) -> Unit) {
     val signIn = rememberLauncherForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { res ->
-        if (res.resultCode == Activity.RESULT_OK) vm.onGoogleSignInResult(res.data) else vm.onGoogleSignInCancelled()
+        // Even a non-OK result can carry Google's real error, so let the ViewModel read it.
+        if (res.resultCode == Activity.RESULT_OK || res.data != null) vm.onGoogleSignInResult(res.data) else vm.onGoogleSignInCancelled()
     }
     var pastedLink by rememberSaveable { mutableStateOf("") }
 
