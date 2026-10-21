@@ -2,7 +2,9 @@ package com.karthi.expense.data
 
 import androidx.room.Entity
 import androidx.room.PrimaryKey
+import com.karthi.expense.core.CategoryParts
 import com.karthi.expense.core.ParsedTxn
+import java.math.BigDecimal
 
 /**
  * A transaction read from SMS and kept on the phone until it is synced to the sheet.
@@ -28,8 +30,28 @@ data class PendingTxn(
     val syncedAt: Long? = null,
     /** Other people's parts of this transaction, e.g. "Arun:400;Bala:400". See [com.karthi.expense.core.Shares]. */
     val shares: String? = null,
+    /** Your part split across categories, e.g. "Food:300;Movie:500"; null when it's one category. See [com.karthi.expense.core.CategoryParts]. */
+    val parts: String? = null,
 ) {
+    /** The rows this transaction becomes in the sheet: one, or one per category part (plus other people's shares). */
+    fun sheetRows(): List<PendingTxn> =
+        CategoryParts.rows(BigDecimal(amount), category, parts, shares, Categories.NOT_MINE).map { r ->
+            if (r.suffix.isEmpty()) this
+            else copy(
+                id = id + r.suffix,
+                amount = r.amount.toPlainString(),
+                category = r.category,
+                shares = r.shares,
+                parts = null,
+                // The bank balance belongs to the transaction once, not to each part.
+                balance = if (r.suffix == "#1") balance else null,
+            )
+        }
+
     companion object {
+        /** Sheet row ids of a split transaction carry a "#..." suffix; this gives back the transaction's id. */
+        fun baseId(rowId: String) = rowId.substringBefore('#')
+
         fun from(t: ParsedTxn, smsTime: Long) = PendingTxn(
             id = t.id,
             bank = t.bank.name,

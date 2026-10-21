@@ -424,7 +424,7 @@ private fun TagScreen(vm: MainViewModel, contentPadding: PaddingValues) {
                 )
             }
             items(dayTxns, key = { it.id }, contentType = { "txn" }) { t ->
-                TxnCard(t, people, Modifier.animateItem()) { category, reason, shares -> vm.tag(t.id, category, reason, shares) }
+                TxnCard(t, people, Modifier.animateItem()) { category, reason, shares, parts -> vm.tag(t.id, category, reason, shares, parts) }
             }
         }
     }

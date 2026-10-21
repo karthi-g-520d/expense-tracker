@@ -32,7 +32,7 @@ class SheetClient(private val settings: SheetSettings) : SheetBackend {
         check(settings.isConfigured) { "Connect your Google Sheet in Settings" }
 
         val rows = JSONArray()
-        txns.forEach { t ->
+        txns.flatMap { it.sheetRows() }.forEach { t ->
             rows.put(
                 JSONObject()
                     .put("id", t.id).put("date", t.date).put("type", t.type)
@@ -48,7 +48,8 @@ class SheetClient(private val settings: SheetSettings) : SheetBackend {
         val res = JSONObject(post(url, body))
         if (res.has("error")) throw IOException("Sheet error: ${res.getString("error")}")
         val ids = res.getJSONArray("ids")
-        List(ids.length()) { ids.getString(it) }
+        // Split transactions are sent as several rows; mark the transaction itself as synced.
+        List(ids.length()) { PendingTxn.baseId(ids.getString(it)) }.distinct()
     }
 
     override suspend fun fetchAll(): SheetData = withContext(Dispatchers.IO) {

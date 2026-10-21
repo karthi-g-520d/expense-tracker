@@ -33,7 +33,7 @@ class GoogleSheetsClient(
 
         val existing = values(token, id, "$TAB!A2:A").map { it.optString(0) }.toSet()
         val rows = JSONArray()
-        txns.filter { it.id !in existing }.forEach { t ->
+        txns.flatMap { it.sheetRows() }.filter { it.id !in existing }.forEach { t ->
             rows.put(rowFor(t, java.time.LocalDateTime.now().toString()))
         }
         if (rows.length() > 0) {
@@ -196,7 +196,7 @@ class GoogleSheetsClient(
                 }
             }
         }
-        localSynced().filter { it.id !in found }.forEach { found[it.id] = rowFor(it, "") }
+        localSynced().flatMap { it.sheetRows() }.filter { it.id !in found }.forEach { found[it.id] = rowFor(it, "") }
 
         val rows = JSONArray().put(JSONArray(HEADERS))
         found.values.sortedBy { it.optString(1) }.forEach { rows.put(it) }
