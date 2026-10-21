@@ -53,6 +53,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -97,7 +98,9 @@ class MainActivity : FragmentActivity() {
         locked = appLock.shouldLock()
         setContent {
             ExpenseTheme {
-                Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+                // Surface (not a plain background) also sets the default text and icon colour,
+                // which otherwise stays black and disappears in dark mode.
+                Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
                     if (locked) LockScreen(onUnlock = ::unlock) else MainScreen()
                 }
             }
