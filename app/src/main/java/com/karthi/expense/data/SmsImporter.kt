@@ -2,9 +2,13 @@ package com.karthi.expense.data
 
 import android.content.Context
 import android.provider.Telephony
+import com.karthi.expense.core.Bank
+import com.karthi.expense.core.SelfTransfer
 import com.karthi.expense.core.SmsParser
+import com.karthi.expense.core.TxnType
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.math.BigDecimal
 import java.time.LocalDate
 import java.time.ZoneId
 
@@ -42,7 +46,25 @@ class SmsImporter(private val context: Context, private val dao: PendingTxnDao) 
         val added = dao.insertAll(found).count { it != -1L }
         // Saved only after the insert succeeds, so a crash mid-import re-reads the same SMS.
         prefs.edit().putLong(KEY_LAST_SMS_TIME, newest).apply()
+        tagSelfTransfers()
         added
+    }
+
+    /**
+     * Tags untagged pairs that look like money moved between your own IOB and ICICI accounts
+     * (see [SelfTransfer]). You can still change the tag on either card.
+     */
+    private suspend fun tagSelfTransfers() {
+        val untagged = dao.untaggedUnsynced().associateBy { it.id }
+        val legs = untagged.values.map {
+            SelfTransfer.Leg(it.id, Bank.valueOf(it.bank), TxnType.valueOf(it.type), BigDecimal(it.amount), it.reference, it.smsTime)
+        }
+        for ((debitId, creditId) in SelfTransfer.match(legs)) {
+            val debit = untagged.getValue(debitId)
+            val credit = untagged.getValue(creditId)
+            dao.updateTag(debit.id, Categories.SELF_TRANSFER, "To ${credit.bank} ••${credit.account}", null)
+            dao.updateTag(credit.id, Categories.SELF_TRANSFER, "From ${debit.bank} ••${debit.account}", null)
+        }
     }
 
     /** Next import re-reads from the 1st of this month. Already-stored SMS are skipped by id. */

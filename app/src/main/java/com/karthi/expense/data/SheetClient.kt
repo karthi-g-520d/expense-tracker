@@ -1,6 +1,5 @@
 package com.karthi.expense.data
 
-import com.karthi.expense.core.Shares
 import java.io.IOException
 import java.math.BigDecimal
 import java.net.HttpURLConnection
@@ -41,7 +40,7 @@ class SheetClient(private val settings: SheetSettings) : SheetBackend {
                     .put("counterparty", t.counterparty).put("category", t.category)
                     .put("reason", t.reason).put("reference", t.reference).put("balance", t.balance)
                     .put("shares", t.shares)
-                    .put("my_amount", Shares.myPart(BigDecimal(t.amount), Shares.parse(t.shares)).toDouble())
+                    .put("my_amount", Categories.myAmount(BigDecimal(t.amount), t.shares, t.category).toDouble())
             )
         }
         val body = JSONObject().put("token", token).put("rows", rows).toString()

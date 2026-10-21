@@ -6,7 +6,6 @@ import androidx.room.Insert
 import androidx.room.PrimaryKey
 import androidx.room.Query
 import androidx.room.Transaction
-import com.karthi.expense.core.Shares
 import kotlinx.coroutines.flow.Flow
 
 /** A row from the Google Sheet, cached on the phone for the dashboard. */
@@ -24,8 +23,8 @@ data class SheetTxn(
     /** Other people's parts, e.g. "Arun:400". Null for transactions that are all yours. */
     val shares: String? = null,
 ) {
-    /** Your own part: the amount minus other people's shares. A function so Room doesn't treat it as a column. */
-    fun myAmount(): Double = Shares.myPart(amount.toBigDecimal(), Shares.parse(shares)).toDouble()
+    /** Your own part (see [Categories.myAmount]). A function so Room doesn't treat it as a column. */
+    fun myAmount(): Double = Categories.myAmount(amount.toBigDecimal(), shares, category).toDouble()
 }
 
 @Dao
