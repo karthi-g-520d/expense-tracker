@@ -24,11 +24,11 @@ function setup() {
   const summary = ss.getSheetByName(SUMMARY) || ss.insertSheet(SUMMARY);
   summary.clear();
   summary.getRange('A1').setFormula(
-    "=QUERY({ARRAYFORMULA(IF(" + SHEET + "!B2:B=\"\",,TEXT(" + SHEET + "!B2:B,\"yyyy-mm\")))," +
-    SHEET + "!C2:C," + SHEET + "!D2:D," + SHEET + "!H2:H}," +
+    "=QUERY({ARRAYFORMULA(IF(ISNUMBER(" + SHEET + "!B:B),TEXT(" + SHEET + "!B:B,\"yyyy-mm\"),)), " +
+    SHEET + "!C:C, " + SHEET + "!D:D, " + SHEET + "!H:H}, " +
     "\"select Col1, Col2, Col4, sum(Col3) where Col1 is not null " +
     "group by Col1, Col2, Col4 order by Col1 desc, Col2 desc, sum(Col3) desc " +
-    "label Col1 'Month', Col2 'Type', Col4 'Category', sum(Col3) 'Total'\",0)");
+    "label Col1 'Month', Col2 'Type', Col4 'Category', sum(Col3) 'Total'\", 0)");
 
   const props = PropertiesService.getScriptProperties();
   if (!props.getProperty('TOKEN')) props.setProperty('TOKEN', Utilities.getUuid());
