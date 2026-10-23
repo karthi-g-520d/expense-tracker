@@ -30,7 +30,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -49,6 +48,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Button
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -56,6 +56,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
+import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
@@ -66,6 +69,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.StrokeCap
@@ -81,8 +85,11 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.karthi.expense.data.AccountSettings
 import com.karthi.expense.data.Categories
+import com.karthi.expense.data.PendingTxn
 import dev.chrisbanes.haze.HazeState
 import dev.chrisbanes.haze.haze
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.util.Locale
@@ -362,6 +369,7 @@ private fun SyncBar(vm: MainViewModel, total: Int, tagged: Int) {
 
 private val dayHeader = DateTimeFormatter.ofPattern("EEEE, d MMM", Locale.ENGLISH)
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun TagScreen(vm: MainViewModel, contentPadding: PaddingValues) {
     val context = LocalContext.current
@@ -390,29 +398,67 @@ private fun TagScreen(vm: MainViewModel, contentPadding: PaddingValues) {
     val txns by vm.unsynced.collectAsState()
     val people by vm.knownPeople.collectAsState()
 
-    if (txns.isEmpty()) {
-        Column(
-            Modifier.fillMaxSize().padding(contentPadding),
-            verticalArrangement = Arrangement.Center,
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-            if (vm.importing) {
-                Text("Reading your SMS…", color = MaterialTheme.colorScheme.onSurfaceVariant)
-            } else {
-                Text("All caught up", style = MaterialTheme.typography.titleLarge)
-                Text(
-                    "New bank SMS will show up here.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
+    // Pull down to read new SMS, like Instagram or YouTube. The spinner stays up for a
+    // short minimum so a fast read still reads as "checked" instead of a flicker.
+    var pulled by remember { mutableStateOf(false) }
+    LaunchedEffect(pulled) {
+        if (pulled) {
+            delay(600)
+            snapshotFlow { vm.importing }.first { !it }
+            pulled = false
         }
-        return
     }
+    val pullState = rememberPullToRefreshState()
+    PullToRefreshBox(
+        isRefreshing = pulled,
+        onRefresh = {
+            pulled = true
+            vm.importSms()
+        },
+        state = pullState,
+        modifier = Modifier.fillMaxSize(),
+        indicator = {
+            PullToRefreshDefaults.Indicator(
+                state = pullState,
+                isRefreshing = pulled,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.align(Alignment.TopCenter).padding(top = contentPadding.calculateTopPadding()),
+            )
+        },
+    ) {
+        if (txns.isEmpty()) {
+            // A list (not a plain column) so the empty screen can be pulled too.
+            LazyColumn(Modifier.fillMaxSize(), contentPadding = contentPadding) {
+                item(key = "empty") {
+                    Column(
+                        Modifier.fillParentMaxSize(),
+                        verticalArrangement = Arrangement.Center,
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
+                        if (vm.importing && !pulled) {
+                            Text("Reading your SMS…", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        } else {
+                            Text("All caught up", style = MaterialTheme.typography.titleLarge)
+                            Text(
+                                "Pull down to check for new bank SMS.",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                }
+            }
+        } else {
+            TagList(vm, txns, people, contentPadding)
+        }
+    }
+}
 
+@Composable
+private fun TagList(vm: MainViewModel, txns: List<PendingTxn>, people: List<String>, contentPadding: PaddingValues) {
     val days = remember(txns) { txns.groupBy { it.date } }
     LazyColumn(
-        Modifier.fillMaxHeight(),
+        Modifier.fillMaxSize(),
         contentPadding = contentPadding,
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
