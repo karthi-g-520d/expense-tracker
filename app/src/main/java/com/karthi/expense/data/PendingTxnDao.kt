@@ -29,9 +29,15 @@ interface PendingTxnDao {
     @Query("SELECT * FROM pending_txn WHERE syncedAt IS NULL AND category IS NULL")
     suspend fun untaggedUnsynced(): List<PendingTxn>
 
+    /** Every bank and account digits seen so far, to fill in your accounts after updating. */
+    @Query("SELECT DISTINCT bank, account FROM pending_txn")
+    suspend fun seenAccounts(): List<SeenAccount>
+
     @Query("SELECT * FROM pending_txn WHERE syncedAt IS NOT NULL")
     suspend fun synced(): List<PendingTxn>
 
     @Query("UPDATE pending_txn SET syncedAt = :time WHERE id IN (:ids)")
     suspend fun markSynced(ids: List<String>, time: Long)
 }
+
+data class SeenAccount(val bank: String, val account: String)

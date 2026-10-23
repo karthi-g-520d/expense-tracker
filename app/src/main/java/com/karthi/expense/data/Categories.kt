@@ -17,7 +17,7 @@ data class Category(val name: String, val icon: String = "")
  */
 object Categories {
 
-    /** Money moved between your own IOB and ICICI accounts: neither spend nor income. */
+    /** Money moved between your own accounts: neither spend nor income. */
     const val SELF_TRANSFER = "Self transfer"
 
     /** Set automatically when the whole amount belongs to other people (see Shares). */
