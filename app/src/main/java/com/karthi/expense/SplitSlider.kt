@@ -13,7 +13,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -232,7 +231,7 @@ fun SplitSlider(
         }
 
         // Labels: tap one to type its amount.
-        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        Row(Modifier.fillMaxWidth().chipRow(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             labels.forEachIndexed { i, label ->
                 Row(
                     Modifier.clip(RoundedCornerShape(8.dp)).clickable { typing = i }.padding(horizontal = 4.dp, vertical = 2.dp),
