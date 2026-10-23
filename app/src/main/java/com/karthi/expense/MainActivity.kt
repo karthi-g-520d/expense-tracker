@@ -11,7 +11,6 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.biometric.BiometricPrompt
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.animateFloatAsState
@@ -23,7 +22,6 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -35,7 +33,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -45,7 +42,6 @@ import androidx.compose.foundation.pager.PagerDefaults
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -83,7 +79,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
-import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
@@ -100,7 +95,6 @@ import kotlinx.coroutines.launch
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.util.Locale
-import kotlin.math.roundToInt
 
 class MainActivity : FragmentActivity() {
     private val appLock by lazy { AppLock(this) }
@@ -259,7 +253,6 @@ private fun MainScreen(vm: MainViewModel = viewModel()) {
                 ) {
                     TabPill(
                         position = { pager.currentPage + pager.currentPageOffsetFraction },
-                        selected = tab,
                         labels = listOf("To tag" + if (pending.isEmpty()) "" else " · ${pending.size}", "Dashboard"),
                     ) { scope.launch { pager.animateScrollToPage(it, animationSpec = settleSpring()) } }
                 }
@@ -311,41 +304,6 @@ private fun TopBar(
 
 /** Damped all the way: pages settle firmly with no overshoot. */
 private fun settleSpring() = spring<Float>(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMediumLow)
-
-/** Floating glass capsule with a highlight that tracks the pages as they're swiped. */
-@Composable
-private fun TabPill(position: () -> Float, selected: Int, labels: List<String>, onSelect: (Int) -> Unit) {
-    val segment = 132.dp
-    Box(Modifier.glass(CircleShape).padding(5.dp)) {
-        Box(
-            Modifier
-                .offset { IntOffset((segment.toPx() * position()).roundToInt(), 0) }
-                .width(segment)
-                .height(42.dp)
-                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.16f), CircleShape)
-        )
-        Row {
-            labels.forEachIndexed { i, label ->
-                val color by animateColorAsState(
-                    if (i == selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                    fluidSpring(),
-                    label = "tab-label",
-                )
-                val interaction = remember { MutableInteractionSource() }
-                Box(
-                    Modifier
-                        .width(segment)
-                        .height(42.dp)
-                        .pressScale(interaction, 0.94f)
-                        .clickable(interaction, indication = null) { onSelect(i) },
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text(label, style = MaterialTheme.typography.labelLarge, color = color)
-                }
-            }
-        }
-    }
-}
 
 /** Tagging progress plus the Sync button, on a glass card above the tabs. */
 @Composable
