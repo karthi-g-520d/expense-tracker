@@ -15,7 +15,6 @@ import androidx.compose.animation.scaleOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -217,7 +216,7 @@ fun TxnCard(
 
             if (!allTheirs) {
                 Row(
-                    Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp),
+                    Modifier.fillMaxWidth().chipRow(rememberScrollState()).padding(horizontal = 16.dp),
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
                     Categories.forType(t.type).forEach { c ->
@@ -395,7 +394,7 @@ private fun SplitEditor(
             )
         }
 
-        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        Row(Modifier.fillMaxWidth().chipRow(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             CategoryChip("📇 Contacts", selected = false, onClick = onPickContact)
             suggestions.forEach { name -> CategoryChip("+ $name", selected = false) { onAdd(name) } }
             CategoryChip("+ Type a name", selected = false) { onAdd("") }

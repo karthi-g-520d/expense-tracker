@@ -81,10 +81,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     var refreshError by mutableStateOf<String?>(null)
         private set
 
-    /** How many new transactions the last import found; null until the first import finishes. */
-    var lastImportCount by mutableStateOf<Int?>(null)
-        private set
-
     var importing by mutableStateOf(false)
         private set
 
@@ -106,17 +102,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         importing = true
         viewModelScope.launch {
             try {
-                lastImportCount = importer.importNew()
+                importer.importNew()
             } finally {
                 importing = false
             }
         }
-    }
-
-    /** Forgets the read checkpoint and re-reads this month's SMS (duplicates are skipped). */
-    fun rescanThisMonth() {
-        importer.rescanThisMonth()
-        importSms()
     }
 
     /** Renames in the list and on cards not yet synced; rows already in the sheet keep the old name. */

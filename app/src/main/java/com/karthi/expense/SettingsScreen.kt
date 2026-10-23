@@ -1,10 +1,14 @@
 package com.karthi.expense
 
+import android.Manifest
 import android.app.Activity
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
+import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.IntentSenderRequest
+import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -28,6 +32,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -36,6 +41,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.LifecycleResumeEffect
+import kotlinx.coroutines.launch
 
 private const val SETUP_GUIDE = "https://github.com/karthi-g-520d/expense-tracker/blob/main/sheet/README.md"
 
@@ -58,6 +65,8 @@ fun SettingsScreen(vm: MainViewModel, contentPadding: PaddingValues) {
         AccountsCard()
 
         CategoriesCard(vm)
+
+        BackgroundCard()
 
         AppLockCard()
 
@@ -107,22 +116,6 @@ fun SettingsScreen(vm: MainViewModel, contentPadding: PaddingValues) {
                     }
                 }
                 TextButton(onClick = { open(SETUP_GUIDE) }) { Text("How to set up the sheet") }
-            }
-        }
-
-        Box(Modifier.fillMaxWidth().softCard()) {
-            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("SMS", style = MaterialTheme.typography.titleMedium)
-                Text(
-                    "The app reads new bank messages each time it opens. " +
-                        "Re-scan if you think some were missed, or after adding an account; ones already added are skipped.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                OutlinedButton(onClick = vm::rescanThisMonth, enabled = !vm.importing) {
-                    Text(if (vm.importing) "Scanning…" else "Re-scan this month's SMS")
-                }
-                vm.lastImportCount?.let { Text("Last scan found $it new", style = MaterialTheme.typography.bodySmall) }
             }
         }
 
@@ -223,6 +216,94 @@ private fun GoogleAccountCard(vm: MainViewModel, open: (String) -> Unit) {
                 }
             }
             vm.googleMessage?.let { Text(it, style = MaterialTheme.typography.bodyMedium) }
+        }
+    }
+}
+
+/** Plain grey, the phone's wallpaper, or a chosen photo, blurred behind the cards. */
+@Composable
+private fun BackgroundCard() {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var message by remember { mutableStateOf<String?>(null) }
+    // Set while the user is away on Android's "All files access" screen.
+    var askedForAccess by rememberSaveable { mutableStateOf(false) }
+    var needsAccess by rememberSaveable { mutableStateOf(false) }
+
+    fun useWallpaper() {
+        needsAccess = false
+        scope.launch {
+            message = if (Backdrop.useWallpaper(context)) null
+            else "Couldn't read the wallpaper. Live wallpapers can't be shared; choose a photo instead."
+        }
+    }
+    val askStorage = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) useWallpaper() else message = "Without storage access Android won't share the wallpaper. You can choose a photo instead."
+    }
+    val pickPhoto = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+        if (uri != null) scope.launch { message = if (Backdrop.usePhoto(context, uri)) null else "Couldn't open that photo." }
+    }
+    LifecycleResumeEffect(askedForAccess) {
+        if (askedForAccess) {
+            askedForAccess = false
+            if (Backdrop.canReadWallpaper(context)) useWallpaper()
+        }
+        onPauseOrDispose {}
+    }
+
+    Box(Modifier.fillMaxWidth().softCard()) {
+        Column(Modifier.padding(vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Column(Modifier.padding(horizontal = 16.dp)) {
+                Text("Background", style = MaterialTheme.typography.titleMedium)
+                Text(
+                    "Shows a soft, blurred picture behind the cards.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Row(
+                Modifier.fillMaxWidth().chipRow(rememberScrollState()).padding(horizontal = 16.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                CategoryChip("Plain", selected = Backdrop.mode == Backdrop.Mode.PLAIN) {
+                    needsAccess = false
+                    message = null
+                    Backdrop.usePlain()
+                }
+                CategoryChip("🖼️ Wallpaper", selected = Backdrop.mode == Backdrop.Mode.WALLPAPER) {
+                    message = null
+                    when {
+                        Backdrop.canReadWallpaper(context) -> useWallpaper()
+                        Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU -> needsAccess = true
+                        else -> askStorage.launch(Manifest.permission.READ_EXTERNAL_STORAGE)
+                    }
+                }
+                CategoryChip("📷 Photo", selected = Backdrop.mode == Backdrop.Mode.PHOTO) {
+                    needsAccess = false
+                    message = null
+                    pickPhoto.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                }
+            }
+            if (needsAccess && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        "Android only shares the wallpaper with apps that have \"All files access\". " +
+                            "The app uses it just to read the wallpaper. Or pick the same picture with Photo.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    OutlinedButton(onClick = {
+                        askedForAccess = true
+                        val app = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION, Uri.parse("package:${context.packageName}"))
+                        runCatching { context.startActivity(app) }
+                            .recoverCatching { context.startActivity(Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION)) }
+                            .onFailure { askedForAccess = false }
+                    }) { Text("Allow all files access") }
+                }
+            }
+            message?.let {
+                Text(it, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(horizontal = 16.dp))
+            }
         }
     }
 }

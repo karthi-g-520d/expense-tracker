@@ -12,7 +12,8 @@ import androidx.biometric.BiometricPrompt
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -39,6 +40,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.PagerDefaults
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
@@ -67,6 +71,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
@@ -78,6 +83,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
@@ -90,9 +96,11 @@ import dev.chrisbanes.haze.HazeState
 import dev.chrisbanes.haze.haze
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.util.Locale
+import kotlin.math.roundToInt
 
 class MainActivity : FragmentActivity() {
     private val appLock by lazy { AppLock(this) }
@@ -104,6 +112,7 @@ class MainActivity : FragmentActivity() {
         super.onCreate(savedInstanceState)
         Categories.init(this)
         AccountSettings.init(this)
+        Backdrop.init(this)
         unlockPrompt = appLock.createPrompt(this) { ok -> if (ok) locked = false }
         // Decided before the first frame, so the app's content never flashes up behind the lock.
         locked = appLock.shouldLock()
@@ -165,7 +174,9 @@ private data class Insets(val top: Dp, val bottom: Dp) {
 
 @Composable
 private fun MainScreen(vm: MainViewModel = viewModel()) {
-    var tab by rememberSaveable { mutableIntStateOf(0) }
+    val pager = rememberPagerState { 2 }
+    val tab = pager.currentPage
+    val scope = rememberCoroutineScope()
     var showSettings by rememberSaveable { mutableStateOf(false) }
     val pending by vm.unsynced.collectAsState()
     val hazeState = remember { HazeState() }
@@ -178,6 +189,7 @@ private fun MainScreen(vm: MainViewModel = viewModel()) {
 
     // The one strong vibration in the app: when a sync finishes. Saved so rotating doesn't repeat it.
     val context = LocalContext.current
+    LaunchedEffect(Unit) { Backdrop.load(context) }
     var hapticsDone by rememberSaveable { mutableIntStateOf(vm.syncAttempts) }
     LaunchedEffect(vm.syncAttempts) {
         if (vm.syncAttempts > hapticsDone) {
@@ -190,6 +202,7 @@ private fun MainScreen(vm: MainViewModel = viewModel()) {
         Box(Modifier.fillMaxSize()) {
             // Everything that scrolls; the glass bars blur this.
             Box(Modifier.fillMaxSize().haze(hazeState)) {
+                BackdropLayer()
                 AnimatedContent(
                     targetState = showSettings,
                     transitionSpec = {
@@ -202,16 +215,13 @@ private fun MainScreen(vm: MainViewModel = viewModel()) {
                     if (settings) {
                         SettingsScreen(vm, insets.padding())
                     } else {
-                        AnimatedContent(
-                            targetState = tab,
-                            transitionSpec = {
-                                val dir = if (targetState > initialState) 1 else -1
-                                (slideInHorizontally(fluidSpring()) { dir * it / 4 } + fadeIn(fluidSpring())) togetherWith
-                                    (slideOutHorizontally(fluidSpring()) { -dir * it / 4 } + fadeOut(fluidSpring()))
-                            },
-                            label = "tab",
-                        ) { t ->
-                            if (t == 0) TagScreen(vm, insets.padding()) else DashboardScreen(vm, insets.padding())
+                        // Swipe sideways between the tabs; the page follows the finger and settles without bounce.
+                        HorizontalPager(
+                            state = pager,
+                            flingBehavior = PagerDefaults.flingBehavior(pager, snapAnimationSpec = settleSpring()),
+                            modifier = Modifier.fillMaxSize(),
+                        ) { page ->
+                            if (page == 0) TagScreen(vm, insets.padding()) else DashboardScreen(vm, insets.padding())
                         }
                     }
                 }
@@ -247,7 +257,11 @@ private fun MainScreen(vm: MainViewModel = viewModel()) {
                     enter = slideInVertically(fluidSpring()) { it } + fadeIn(fluidSpring()),
                     exit = slideOutVertically(fluidSpring()) { it } + fadeOut(fluidSpring()),
                 ) {
-                    TabPill(tab, listOf("To tag" + if (pending.isEmpty()) "" else " · ${pending.size}", "Dashboard")) { tab = it }
+                    TabPill(
+                        position = { pager.currentPage + pager.currentPageOffsetFraction },
+                        selected = tab,
+                        labels = listOf("To tag" + if (pending.isEmpty()) "" else " · ${pending.size}", "Dashboard"),
+                    ) { scope.launch { pager.animateScrollToPage(it, animationSpec = settleSpring()) } }
                 }
             }
         }
@@ -295,15 +309,17 @@ private fun TopBar(
     }
 }
 
-/** Floating glass capsule with a highlight that glides to the chosen tab. */
+/** Damped all the way: pages settle firmly with no overshoot. */
+private fun settleSpring() = spring<Float>(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMediumLow)
+
+/** Floating glass capsule with a highlight that tracks the pages as they're swiped. */
 @Composable
-private fun TabPill(selected: Int, labels: List<String>, onSelect: (Int) -> Unit) {
+private fun TabPill(position: () -> Float, selected: Int, labels: List<String>, onSelect: (Int) -> Unit) {
     val segment = 132.dp
-    val offset by animateDpAsState(segment * selected, fluidSpring(), label = "tab-highlight")
     Box(Modifier.glass(CircleShape).padding(5.dp)) {
         Box(
             Modifier
-                .offset(x = offset)
+                .offset { IntOffset((segment.toPx() * position()).roundToInt(), 0) }
                 .width(segment)
                 .height(42.dp)
                 .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.16f), CircleShape)

@@ -9,7 +9,9 @@ import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.border
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -19,11 +21,21 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
 import dev.chrisbanes.haze.HazeState
 import dev.chrisbanes.haze.HazeStyle
@@ -61,19 +73,24 @@ fun Modifier.glass(shape: Shape, floating: Boolean = true): Modifier {
         .then(if (floating) Modifier.border(0.75.dp, glassEdge(dark), shape) else Modifier)
 }
 
-/** Solid card with a soft, wide shadow and a hairline edge, iOS inset-grouped style. */
+/**
+ * Card with a soft, wide shadow and a hairline edge, iOS inset-grouped style.
+ * Solid on the plain background; slightly see-through over a wallpaper so its colours glow through.
+ */
 @Composable
 fun Modifier.softCard(shape: Shape = MaterialTheme.shapes.large, highlight: Color = Color.Transparent): Modifier {
     val dark = isSystemInDarkTheme()
+    val seeThrough = Backdrop.image != null
     return this
         .shadow(
-            elevation = if (dark) 0.dp else 10.dp,
+            // A shadow would show through a see-through card as a grey smudge.
+            elevation = if (dark || seeThrough) 0.dp else 10.dp,
             shape = shape,
             ambientColor = Color.Black.copy(alpha = 0.05f),
             spotColor = Color.Black.copy(alpha = 0.10f),
         )
         .clip(shape)
-        .background(MaterialTheme.colorScheme.surface)
+        .background(MaterialTheme.colorScheme.surface.copy(alpha = if (seeThrough) 0.78f else 1f))
         .border(0.5.dp, glassEdge(dark), shape)
         .then(if (highlight.alpha > 0f) Modifier.border(1.5.dp, highlight, shape) else Modifier)
 }
@@ -83,6 +100,43 @@ private fun glassEdge(dark: Boolean) = Brush.verticalGradient(
     if (dark) listOf(Color.White.copy(alpha = 0.22f), Color.White.copy(alpha = 0.06f))
     else listOf(Color.White.copy(alpha = 0.9f), Color.Black.copy(alpha = 0.06f))
 )
+
+/**
+ * A sideways-scrolling row of chips: chips fade out as they slide into the card's side padding,
+ * and a swipe that runs past the end of the row stays with the row instead of switching tabs.
+ * Put the side padding after this modifier, inside the scroll.
+ */
+fun Modifier.chipRow(state: ScrollState, fade: Dp = 16.dp): Modifier = this
+    .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
+    .drawWithContent {
+        drawContent()
+        val w = fade.toPx()
+        // Each fade eases in over the first few pixels of scroll instead of popping on.
+        val left = 1f - (state.value / w).coerceIn(0f, 1f)
+        val right = 1f - ((state.maxValue - state.value) / w).coerceIn(0f, 1f)
+        if (left < 1f) {
+            drawRect(
+                Brush.horizontalGradient(listOf(Color.Black.copy(alpha = left), Color.Black), startX = 0f, endX = w),
+                size = Size(w, size.height),
+                blendMode = BlendMode.DstIn,
+            )
+        }
+        if (right < 1f) {
+            drawRect(
+                Brush.horizontalGradient(listOf(Color.Black, Color.Black.copy(alpha = right)), startX = size.width - w, endX = size.width),
+                topLeft = Offset(size.width - w, 0f),
+                size = Size(w, size.height),
+                blendMode = BlendMode.DstIn,
+            )
+        }
+    }
+    .nestedScroll(KeepSideways)
+    .horizontalScroll(state)
+
+private object KeepSideways : NestedScrollConnection {
+    override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource) = Offset(available.x, 0f)
+    override suspend fun onPostFling(consumed: Velocity, available: Velocity) = Velocity(available.x, 0f)
+}
 
 /** Shrinks slightly while pressed and springs back on release. */
 @Composable
