@@ -25,6 +25,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -33,6 +34,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -74,11 +76,13 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
@@ -272,20 +276,49 @@ private fun TopBar(
     modifier: Modifier = Modifier,
 ) {
     Column(modifier.fillMaxWidth().glass(RoundedCornerShape(0.dp), floating = false).statusBarsPadding()) {
-        Row(Modifier.fillMaxWidth().height(56.dp).padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-            if (showSettings) {
-                IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
-            } else {
-                Spacer(Modifier.width(12.dp))
-            }
+        // One button that rolls across the bar: the gear on the right turns into the back arrow
+        // on the left as Settings opens, and rolls back when it closes.
+        val morph = animateFloatAsState(if (showSettings) 1f else 0f, settleSpring(), label = "gear-to-back")
+        BoxWithConstraints(Modifier.fillMaxWidth().height(56.dp)) {
+            val travel = maxWidth - 56.dp
             AnimatedContent(
                 targetState = title,
                 transitionSpec = { fadeIn(fluidSpring()) togetherWith fadeOut(fluidSpring()) },
-                modifier = Modifier.weight(1f),
+                modifier = Modifier
+                    .align(Alignment.CenterStart)
+                    .offset { IntOffset((16.dp + 40.dp * morph.value).roundToPx(), 0) }
+                    .padding(end = 120.dp),
                 label = "title",
-            ) { Text(it, style = MaterialTheme.typography.headlineSmall) }
-            if (!showSettings) {
-                IconButton(onClick = onOpenSettings) { Icon(Icons.Filled.Settings, contentDescription = "Settings") }
+            ) { Text(it, style = MaterialTheme.typography.headlineSmall, maxLines = 1) }
+            IconButton(
+                onClick = if (showSettings) onBack else onOpenSettings,
+                modifier = Modifier
+                    .align(Alignment.CenterStart)
+                    .offset { IntOffset((4.dp + travel * (1f - morph.value)).roundToPx(), 0) },
+            ) {
+                // Both icons turn with the roll; the gear shrinks away as the arrow grows in.
+                Icon(
+                    Icons.Filled.Settings,
+                    contentDescription = if (showSettings) null else "Settings",
+                    modifier = Modifier.graphicsLayer {
+                        val m = morph.value
+                        rotationZ = -360f * m
+                        alpha = (1f - m * 1.6f).coerceIn(0f, 1f)
+                        scaleX = 1f - 0.5f * m
+                        scaleY = 1f - 0.5f * m
+                    },
+                )
+                Icon(
+                    Icons.AutoMirrored.Filled.ArrowBack,
+                    contentDescription = if (showSettings) "Back" else null,
+                    modifier = Modifier.graphicsLayer {
+                        val m = morph.value
+                        rotationZ = -360f * m
+                        alpha = ((m - 0.35f) * 1.6f).coerceIn(0f, 1f)
+                        scaleX = 0.5f + 0.5f * m
+                        scaleY = 0.5f + 0.5f * m
+                    },
+                )
             }
         }
         if (banner) {
