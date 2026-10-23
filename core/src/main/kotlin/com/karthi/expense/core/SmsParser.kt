@@ -1,17 +1,21 @@
 package com.karthi.expense.core
 
 import java.math.BigDecimal
+import java.text.Normalizer
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 
 /**
- * Turns ICICI and IOB transaction SMS into [ParsedTxn].
+ * Turns Indian bank transaction SMS into [ParsedTxn].
  *
- * Debit vs credit is decided by the verb tied to the user's own account
- * ("Acct XX597 debited", "Credited to SB-xxx1035"), never by searching for
- * the word "credited": an ICICI debit SMS also says "<payee> credited".
- * Messages that match no pattern (OTPs, offers, etc.) return null.
+ * ICICI and IOB formats seen on the owner's phone have exact patterns (so their ids never change);
+ * every other bank goes through a general reader that looks for an amount, your account or card
+ * ("A/c XX1234", "Card ending 5678") and the verb tied to that account.
+ *
+ * Debit vs credit is decided by the verb nearest your account, never by searching for the word
+ * "credited": a debit SMS often also says "<payee> credited". Messages that aren't a completed
+ * debit or credit (OTPs, offers, payment requests, "will be debited" reminders) return null.
  */
 object SmsParser {
 
@@ -46,9 +50,19 @@ object SmsParser {
     private val iobDebitDate = DateTimeFormatter.ISO_LOCAL_DATE
     private val iobCreditDate = DateTimeFormatter.ofPattern("dd-MM-yyyy")
 
-    fun parse(body: String): ParsedTxn? {
-        val text = body.replace(Regex("""\s+"""), " ").trim()
+    /**
+     * @param sender the SMS address, e.g. "VM-HDFCBK-S"; tells the bank apart when the text doesn't.
+     * @param received the day the SMS arrived, used when the text has no date of its own.
+     */
+    fun parse(body: String, sender: String? = null, received: LocalDate? = null): ParsedTxn? {
+        // NFKC turns styled letters some banks use ("𝗌𝗉𝖾𝗇𝗍") back into plain ones.
+        val text = Normalizer.normalize(body, Normalizer.Form.NFKC).replace(Regex("""\s+"""), " ").trim()
+        val senderBank = Bank.fromSender(sender)
+        parseKnown(text)?.let { if (senderBank == null || senderBank == it.bank) return it }
+        return GeneralSms.parse(text, sender, senderBank, received)
+    }
 
+    private fun parseKnown(text: String): ParsedTxn? {
         iciciDebit.find(text)?.let { m ->
             val (acct, amt, date, payee) = m.destructured
             return ParsedTxn(
@@ -84,7 +98,7 @@ object SmsParser {
         return null
     }
 
-    private fun amount(raw: String) = BigDecimal(raw.replace(",", ""))
+    internal fun amount(raw: String) = BigDecimal(raw.replace(",", "").trimEnd('.'))
 
     // "20-OCT-26" -> "20-Oct-26" so the formatter accepts any casing.
     private fun titleCaseMonth(date: String): String {

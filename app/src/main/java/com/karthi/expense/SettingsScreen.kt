@@ -55,6 +55,8 @@ fun SettingsScreen(vm: MainViewModel, contentPadding: PaddingValues) {
     ) {
         GoogleAccountCard(vm, open = { open(it) })
 
+        AccountsCard()
+
         CategoriesCard(vm)
 
         AppLockCard()
@@ -112,8 +114,8 @@ fun SettingsScreen(vm: MainViewModel, contentPadding: PaddingValues) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("SMS", style = MaterialTheme.typography.titleMedium)
                 Text(
-                    "The app reads new ICICI and IOB messages each time it opens. " +
-                        "Re-scan if you think some were missed; ones already added are skipped.",
+                    "The app reads new bank messages each time it opens. " +
+                        "Re-scan if you think some were missed, or after adding an account; ones already added are skipped.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

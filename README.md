@@ -1,11 +1,11 @@
 # Expense Tracker
 
-Personal Android app that reads ICICI and IOB bank SMS, lets you tag each debit or credit with a
+Android app that reads bank SMS from any Indian bank, lets you tag each debit or credit with a
 category and reason, syncs them to a Google Sheet, and shows a monthly spending dashboard.
 
 ## Modules
 
-- `core/` – plain Kotlin: SMS parsing (`SmsParser`) and the transaction model. Unit tested.
+- `core/` – plain Kotlin: SMS parsing (`SmsParser`, `GeneralSms` for any bank, `Bank` for sender ids) and the transaction model. Unit tested with sample SMS from ~25 banks (`BankSmsTest`).
 - `app/` – Android app (Kotlin, Jetpack Compose).
 - `sheet/` – Google Apps Script that the app syncs with. See [sheet/README.md](sheet/README.md).
 

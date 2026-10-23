@@ -8,8 +8,18 @@ class SelfTransferTest {
 
     private val hour = 60L * 60 * 1000
 
-    private fun leg(id: String, bank: Bank, type: TxnType, amount: String, time: Long, ref: String? = null) =
-        SelfTransfer.Leg(id, bank, type, BigDecimal(amount), ref, time)
+    private fun leg(id: String, bank: Bank, type: TxnType, amount: String, time: Long, ref: String? = null, account: String = "") =
+        SelfTransfer.Leg(id, bank, type, BigDecimal(amount), ref, time, account)
+
+    @Test
+    fun matchesTwoAccountsInTheSameBank_butNotOneAccountMaskedTwoWays() {
+        val legs = listOf(
+            leg("d", Bank.SBI, TxnType.DEBIT, "2000", 0, account = "4821"),
+            leg("sameAccount", Bank.SBI, TxnType.CREDIT, "2000", 60_000, account = "21"),
+            leg("other", Bank.SBI, TxnType.CREDIT, "2000", 120_000, account = "7700"),
+        )
+        assertEquals(listOf("d" to "other"), SelfTransfer.match(legs))
+    }
 
     @Test
     fun matchesDebitInOneBankWithCreditInTheOther() {

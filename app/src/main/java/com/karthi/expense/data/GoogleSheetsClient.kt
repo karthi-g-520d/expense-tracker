@@ -325,7 +325,7 @@ class GoogleSheetsClient(
             "\"select Col1, Col2, Col4, sum(Col3) where Col1 is not null and Col3 <> 0 " +
             "group by Col1, Col2, Col4 order by Col1 desc, Col2 desc, sum(Col3) desc " +
             "label Col1 'Month', Col2 'Type', Col4 'Category', sum(Col3) 'Total'\", 0)"
-        val ID_PATTERN = Regex("((ICICI|IOB)-(DEBIT|CREDIT)|SETTLE)-.+")
+        val ID_PATTERN = Regex("([A-Z]+-(DEBIT|CREDIT)|SETTLE)-.+")
         const val PEOPLE = "People"
         /** Columns A–L, the layout before shares were added. */
         const val LEGACY_COLUMNS = 12

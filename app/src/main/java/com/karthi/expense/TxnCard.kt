@@ -57,6 +57,7 @@ import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.karthi.expense.core.Bank
 import com.karthi.expense.core.Shares
 import com.karthi.expense.core.SplitBar
 import com.karthi.expense.data.Categories
@@ -192,7 +193,7 @@ fun TxnCard(
                         overflow = TextOverflow.Ellipsis,
                     )
                     Text(
-                        "${t.bank} ••${t.account}",
+                        if (t.account.isEmpty()) Bank.labelOf(t.bank) else "${Bank.labelOf(t.bank)} ••${t.account}",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
