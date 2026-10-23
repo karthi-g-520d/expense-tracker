@@ -36,14 +36,16 @@ import java.io.File
 import kotlin.math.roundToInt
 
 /**
- * The picture behind the cards: the phone's wallpaper or a chosen photo, shrunk and blurred once
- * and kept as a small file, so later starts just load it.
+ * The picture behind the cards: the phone's wallpaper or a chosen photo, shrunk and blurred.
+ * Both the blurred result and a small unblurred copy are kept, so later starts show the picture
+ * at once and a change to the blur reaches pictures picked before it.
  */
 object Backdrop {
     enum class Mode { PLAIN, WALLPAPER, PHOTO }
 
     private lateinit var prefs: SharedPreferences
     private lateinit var file: File
+    private lateinit var sourceFile: File
 
     var mode by mutableStateOf(Mode.PLAIN)
         private set
@@ -55,16 +57,19 @@ object Backdrop {
     fun init(context: Context) {
         prefs = context.getSharedPreferences("backdrop", Context.MODE_PRIVATE)
         file = File(context.filesDir, "backdrop.png")
+        sourceFile = File(context.filesDir, "backdrop-source.png")
         mode = prefs.getString(KEY_MODE, null)?.let { runCatching { Mode.valueOf(it) }.getOrNull() } ?: Mode.PLAIN
     }
 
-    /** Shows the saved picture, then re-reads the wallpaper in case it was changed since. */
+    /** Shows the saved picture, then blurs it afresh (re-reading the wallpaper in case it changed). */
     suspend fun load(context: Context) {
         if (mode == Mode.PLAIN) return
         if (image == null) image = withContext(Dispatchers.IO) { BitmapFactory.decodeFile(file.path) }?.asImageBitmap()
-        if (mode == Mode.WALLPAPER && canReadWallpaper(context)) {
-            withContext(Dispatchers.IO) { readWallpaper(context)?.let(::soften)?.also(::save) }?.let { image = it.asImageBitmap() }
-        }
+        val wallpaper = mode == Mode.WALLPAPER && canReadWallpaper(context)
+        withContext(Dispatchers.IO) {
+            val src = if (wallpaper) readWallpaper(context) else BitmapFactory.decodeFile(sourceFile.path)
+            src?.let(::prepare)
+        }?.let { image = it.asImageBitmap() }
     }
 
     /**
@@ -87,18 +92,28 @@ object Backdrop {
         image = null
         prefs.edit().putString(KEY_MODE, Mode.PLAIN.name).apply()
         file.delete()
+        sourceFile.delete()
     }
 
     private suspend fun use(newMode: Mode, read: () -> Bitmap?): Boolean {
-        val soft = withContext(Dispatchers.IO) { runCatching { read() }.getOrNull()?.let(::soften)?.also(::save) } ?: return false
+        val soft = withContext(Dispatchers.IO) { runCatching { read() }.getOrNull()?.let(::prepare) } ?: return false
         mode = newMode
         image = soft.asImageBitmap()
         prefs.edit().putString(KEY_MODE, newMode.name).apply()
         return true
     }
 
-    private fun save(bitmap: Bitmap) {
-        runCatching { file.outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) } }
+    /** Keeps a small unblurred copy and the blurred result; returns the blurred one. */
+    private fun prepare(src: Bitmap): Bitmap {
+        val w = SOURCE_WIDTH.coerceAtMost(src.width)
+        val h = (src.height * w.toFloat() / src.width).roundToInt().coerceAtLeast(1)
+        val small = Bitmap.createScaledBitmap(src.software(), w, h, true)
+        save(small, sourceFile)
+        return soften(small).also { save(it, file) }
+    }
+
+    private fun save(bitmap: Bitmap, to: File) {
+        runCatching { to.outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) } }
     }
 
     private fun readWallpaper(context: Context): Bitmap? = runCatching {
@@ -106,7 +121,7 @@ object Backdrop {
         if (drawable is BitmapDrawable) return drawable.bitmap?.software()
         val w = drawable.intrinsicWidth.takeIf { it > 0 } ?: return null
         val h = drawable.intrinsicHeight.takeIf { it > 0 } ?: return null
-        val scale = SMALL_WIDTH * 4f / w
+        val scale = SOURCE_WIDTH.toFloat() / w
         Bitmap.createBitmap((w * scale).roundToInt(), (h * scale).roundToInt(), Bitmap.Config.ARGB_8888).also {
             drawable.setBounds(0, 0, it.width, it.height)
             drawable.draw(Canvas(it))
@@ -120,7 +135,7 @@ object Backdrop {
         if (bounds.outWidth <= 0) return null
         // Only a small copy is needed, so skip decoding the full-size photo.
         var sample = 1
-        while (bounds.outWidth / (sample * 2) >= SMALL_WIDTH * 4) sample *= 2
+        while (bounds.outWidth / (sample * 2) >= SOURCE_WIDTH) sample *= 2
         val options = BitmapFactory.Options().apply { inSampleSize = sample }
         return resolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, options) }
     }
@@ -128,7 +143,7 @@ object Backdrop {
     private fun Bitmap.software(): Bitmap =
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && config == Bitmap.Config.HARDWARE) copy(Bitmap.Config.ARGB_8888, false) else this
 
-    /** Shrinks to a thumbnail and box-blurs it three times, which looks like a smooth gaussian blur once stretched. */
+    /** Shrinks to a thumbnail and box-blurs it several times, which looks like a smooth gaussian blur once stretched. */
     private fun soften(src: Bitmap): Bitmap {
         val w = SMALL_WIDTH
         val h = (src.height * w.toFloat() / src.width).roundToInt().coerceAtLeast(1)
@@ -136,7 +151,7 @@ object Backdrop {
         val px = IntArray(w * h)
         small.getPixels(px, 0, w, 0, 0, w, h)
         val tmp = IntArray(w * h)
-        repeat(3) {
+        repeat(BLUR_PASSES) {
             boxBlur(px, tmp, w, h, horizontal = true)
             boxBlur(tmp, px, w, h, horizontal = false)
         }
@@ -168,8 +183,11 @@ object Backdrop {
     }
 
     private const val KEY_MODE = "mode"
-    private const val SMALL_WIDTH = 120
-    private const val BLUR_RADIUS = 4
+    private const val SOURCE_WIDTH = 360
+    // Heavy enough that shapes melt into soft colour fields, like iOS behind its glass.
+    private const val SMALL_WIDTH = 72
+    private const val BLUR_RADIUS = 6
+    private const val BLUR_PASSES = 4
 }
 
 /** The blurred picture, washed with the background colour so cards and text stay easy to read. */
