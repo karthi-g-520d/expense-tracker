@@ -404,6 +404,8 @@ private fun TagScreen(vm: MainViewModel, contentPadding: PaddingValues) {
 
     val txns by vm.unsynced.collectAsState()
     val people by vm.knownPeople.collectAsState()
+    var adding by remember { mutableStateOf(false) }
+    if (adding) ManualTxnDialog(onDismiss = { adding = false }, onAdd = vm::addManual)
 
     // Pull down to read new SMS, like Instagram or YouTube. The spinner stays up for a
     // short minimum so a fast read still reads as "checked" instead of a flicker.
@@ -451,18 +453,19 @@ private fun TagScreen(vm: MainViewModel, contentPadding: PaddingValues) {
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
+                            TextButton(onClick = { adding = true }) { Text("+ Add a transaction") }
                         }
                     }
                 }
             }
         } else {
-            TagList(vm, txns, people, contentPadding)
+            TagList(vm, txns, people, contentPadding, onAdd = { adding = true })
         }
     }
 }
 
 @Composable
-private fun TagList(vm: MainViewModel, txns: List<PendingTxn>, people: List<String>, contentPadding: PaddingValues) {
+private fun TagList(vm: MainViewModel, txns: List<PendingTxn>, people: List<String>, contentPadding: PaddingValues, onAdd: () -> Unit) {
     val days = remember(txns) { txns.groupBy { it.date } }
     val ledger by vm.peopleLedger.collectAsState()
     LazyColumn(
@@ -470,6 +473,10 @@ private fun TagList(vm: MainViewModel, txns: List<PendingTxn>, people: List<Stri
         contentPadding = contentPadding,
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
+        // Cash and anything the bank never texted about.
+        item(key = "add", contentType = "add") {
+            TextButton(onClick = onAdd, modifier = Modifier.animateItem()) { Text("+ Add a transaction (cash, missed SMS)") }
+        }
         days.forEach { (date, dayTxns) ->
             item(key = "h-$date", contentType = "day") {
                 Text(
@@ -480,7 +487,9 @@ private fun TagList(vm: MainViewModel, txns: List<PendingTxn>, people: List<Stri
                 )
             }
             items(dayTxns, key = { it.id }, contentType = { "txn" }) { t ->
-                TxnCard(t, people, ledger, Modifier.animateItem()) { category, reason, shares, parts -> vm.tag(t.id, category, reason, shares, parts) }
+                TxnCard(t, people, ledger, Modifier.animateItem(), onRemove = { vm.removeManual(t.id) }) { category, reason, shares, parts ->
+                    vm.tag(t.id, category, reason, shares, parts)
+                }
             }
         }
     }

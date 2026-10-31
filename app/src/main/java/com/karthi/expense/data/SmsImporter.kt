@@ -67,7 +67,8 @@ class SmsImporter(private val context: Context, private val dao: PendingTxnDao) 
      */
     private suspend fun tagSelfTransfers() {
         val untagged = dao.untaggedUnsynced().associateBy { it.id }
-        val legs = untagged.values.map {
+        // Cash or other hand-added entries never pair up as a move between your own accounts.
+        val legs = untagged.values.filterNot { PendingTxn.isManual(it.id) }.map {
             SelfTransfer.Leg(it.id, Bank.entries.firstOrNull { b -> b.name == it.bank } ?: Bank.OTHER, TxnType.valueOf(it.type), BigDecimal(it.amount), it.reference, it.smsTime, it.account)
         }
         for ((debitId, creditId) in SelfTransfer.match(legs)) {

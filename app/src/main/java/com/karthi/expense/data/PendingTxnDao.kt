@@ -33,6 +33,10 @@ interface PendingTxnDao {
     @Query("SELECT DISTINCT bank, account FROM pending_txn")
     suspend fun seenAccounts(): List<SeenAccount>
 
+    /** Only for transactions added by hand and not yet synced; SMS ones would just come back. */
+    @Query("DELETE FROM pending_txn WHERE id = :id AND syncedAt IS NULL")
+    suspend fun deleteUnsynced(id: String)
+
     @Query("SELECT * FROM pending_txn WHERE syncedAt IS NOT NULL")
     suspend fun synced(): List<PendingTxn>
 

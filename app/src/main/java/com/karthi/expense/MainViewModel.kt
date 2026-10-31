@@ -124,6 +124,15 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch { dao.updateTag(id, category, reason?.ifBlank { null }, shares, parts) }
     }
 
+    /** A transaction typed in by hand, e.g. cash; it becomes an ordinary card to tag. */
+    fun addManual(type: String, amount: BigDecimal, counterparty: String?, date: java.time.LocalDate, bank: String, account: String) {
+        viewModelScope.launch { dao.insertAll(listOf(PendingTxn.manual(type, amount, counterparty, date, bank, account))) }
+    }
+
+    fun removeManual(id: String) {
+        if (PendingTxn.isManual(id)) viewModelScope.launch { dao.deleteUnsynced(id) }
+    }
+
     /** Names used in earlier splits, most frequent first, for the name suggestions on cards. */
     val knownPeople: StateFlow<List<String>> =
         combine(sheetRows, unsynced) { rows, pending ->

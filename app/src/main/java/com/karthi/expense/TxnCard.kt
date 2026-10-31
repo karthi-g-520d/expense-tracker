@@ -78,6 +78,7 @@ fun TxnCard(
     knownPeople: List<String>,
     ledger: Map<String, List<PayerMatch.Entry>>,
     modifier: Modifier = Modifier,
+    onRemove: () -> Unit = {},
     onTag: (category: String?, reason: String?, shares: String?, parts: String?) -> Unit,
 ) {
     // Local state so typing isn't interrupted when the database re-emits the list.
@@ -358,7 +359,8 @@ fun TxnCard(
                 )
                 LaunchedEffect(editing) { if (editing && reason.isEmpty()) focus.requestFocus() }
             }
-            if (!(editing || reason.isNotEmpty()) || !splitOpen) {
+            val manual = PendingTxn.isManual(t.id)
+            if (!(editing || reason.isNotEmpty()) || !splitOpen || manual) {
                 Row(Modifier.padding(horizontal = 4.dp)) {
                     if (!(editing || reason.isNotEmpty())) {
                         TextButton(onClick = { editing = true }) { Text("+ Add a note") }
@@ -367,6 +369,9 @@ fun TxnCard(
                         TextButton(onClick = { splitOpen = true }) {
                             Text(if (isDebit) "👥 Split / paid for others" else "👥 From / for someone")
                         }
+                    }
+                    if (manual) {
+                        TextButton(onClick = onRemove) { Text("Remove", color = MaterialTheme.colorScheme.error) }
                     }
                 }
             }
