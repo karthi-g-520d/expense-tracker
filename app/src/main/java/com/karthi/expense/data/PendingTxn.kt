@@ -52,6 +52,28 @@ data class PendingTxn(
         /** Sheet row ids of a split transaction carry a "#..." suffix; this gives back the transaction's id. */
         fun baseId(rowId: String) = rowId.substringBefore('#')
 
+        /** Added by hand (cash, a missed SMS), not read from an SMS. */
+        fun isManual(id: String) = id.startsWith("MANUAL-")
+
+        fun manual(type: String, amount: BigDecimal, counterparty: String?, date: java.time.LocalDate, bank: String, account: String): PendingTxn {
+            val now = System.currentTimeMillis()
+            return PendingTxn(
+                id = "MANUAL-$now",
+                bank = bank,
+                type = type,
+                amount = amount.stripTrailingZeros().toPlainString(),
+                account = account,
+                counterparty = counterparty?.trim()?.ifEmpty { null },
+                date = date.toString(),
+                reference = null,
+                balance = null,
+                smsTime = now,
+            )
+        }
+
+        /** Shown where the bank name would be, and written to the sheet's bank column. */
+        const val MANUAL_BANK = "Cash"
+
         fun from(t: ParsedTxn, smsTime: Long) = PendingTxn(
             id = t.id,
             bank = t.bank.name,

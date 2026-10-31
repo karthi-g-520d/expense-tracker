@@ -56,7 +56,7 @@ import java.time.format.DateTimeFormatter
 import java.util.Locale
 import kotlin.math.abs
 
-private val rupees: NumberFormat = NumberFormat.getCurrencyInstance(Locale("en", "IN"))
+internal val rupees: NumberFormat = NumberFormat.getCurrencyInstance(Locale("en", "IN"))
 private val monthTitle = DateTimeFormatter.ofPattern("MMMM yyyy", Locale.ENGLISH)
 
 private data class CategoryTotal(val category: String, val total: Double, val txns: List<SheetTxn>)

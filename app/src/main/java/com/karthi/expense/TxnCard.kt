@@ -57,6 +57,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.karthi.expense.core.Bank
+import com.karthi.expense.core.PayerMatch
 import com.karthi.expense.core.Shares
 import com.karthi.expense.core.SplitBar
 import com.karthi.expense.data.Categories
@@ -75,7 +76,9 @@ private data class PersonShare(val name: String, val amount: String)
 fun TxnCard(
     t: PendingTxn,
     knownPeople: List<String>,
+    ledger: Map<String, List<PayerMatch.Entry>>,
     modifier: Modifier = Modifier,
+    onRemove: () -> Unit = {},
     onTag: (category: String?, reason: String?, shares: String?, parts: String?) -> Unit,
 ) {
     // Local state so typing isn't interrupted when the database re-emits the list.
@@ -168,6 +171,30 @@ fun TxnCard(
     }
 
     // The system picker hands back just the chosen contact, so no contacts permission is needed.
+    // A guess at who this UPI payment is from (or, on a debit, who you are returning money to).
+    // Only offered on an untouched card, and nothing is saved until the user says yes.
+    var dismissed by remember(t.id) { mutableStateOf(false) }
+    val guess = remember(t.id, t.counterparty, total, isDebit, ledger) {
+        val owing = if (isDebit) ledger.mapValues { (_, es) -> es.map { it.copy(change = it.change.negate()) } } else ledger
+        PayerMatch.suggest(t.counterparty, total, owing)
+    }
+    val showGuess = guess != null && !dismissed && people.isEmpty()
+
+    fun acceptGuess(g: PayerMatch.Suggestion) {
+        people.add(PersonShare(g.person, g.share.stripTrailingZeros().toPlainString()))
+        autoEqual = false
+        splitOpen = true
+        if (reason.isBlank()) {
+            reason = when {
+                isDebit -> "Returned ${g.person}'s money"
+                g.item != null -> "Paid back for ${g.item?.label}"
+                g.clearsAll -> "Paid back in full"
+                else -> "Paid back part"
+            }
+        }
+        save()
+    }
+
     val context = LocalContext.current
     val pickContact = rememberLauncherForActivityResult(ActivityResultContracts.PickContact()) { uri ->
         val name = uri?.let { contactName(context, it) } ?: return@rememberLauncherForActivityResult
@@ -212,6 +239,14 @@ fun TxnCard(
                         )
                     }
                 }
+            }
+
+            AnimatedVisibility(
+                visible = showGuess,
+                enter = expandVertically(fluidSpring()) + fadeIn(fluidSpring()),
+                exit = shrinkVertically(fluidSpring()) + fadeOut(fluidSpring()),
+            ) {
+                guess?.let { g -> GuessStrip(g, isDebit, onYes = { acceptGuess(g) }, onNo = { dismissed = true }) }
             }
 
             if (!allTheirs) {
@@ -262,7 +297,10 @@ fun TxnCard(
                     total = total,
                     mine = mine,
                     people = people,
-                    suggestions = (listOfNotNull(t.counterparty.takeIf { !isDebit }?.let(Shares::cleanName)) + knownPeople)
+                    suggestions = (
+                        listOfNotNull(guess?.person ?: PayerMatch.bestPerson(t.counterparty, knownPeople)) +
+                            listOfNotNull(t.counterparty.takeIf { !isDebit }?.let(Shares::cleanName)) + knownPeople
+                        )
                         .distinctBy { it.lowercase() }
                         .filter { s -> people.none { it.name.equals(s, ignoreCase = true) } }
                         .take(6),
@@ -321,7 +359,8 @@ fun TxnCard(
                 )
                 LaunchedEffect(editing) { if (editing && reason.isEmpty()) focus.requestFocus() }
             }
-            if (!(editing || reason.isNotEmpty()) || !splitOpen) {
+            val manual = PendingTxn.isManual(t.id)
+            if (!(editing || reason.isNotEmpty()) || !splitOpen || manual) {
                 Row(Modifier.padding(horizontal = 4.dp)) {
                     if (!(editing || reason.isNotEmpty())) {
                         TextButton(onClick = { editing = true }) { Text("+ Add a note") }
@@ -331,8 +370,39 @@ fun TxnCard(
                             Text(if (isDebit) "👥 Split / paid for others" else "👥 From / for someone")
                         }
                     }
+                    if (manual) {
+                        TextButton(onClick = onRemove) { Text("Remove", color = MaterialTheme.colorScheme.error) }
+                    }
                 }
             }
+        }
+    }
+}
+
+/** "Looks like Kamalesh paying you back for COTTON HOUSE": one tap to accept, one to wave it away. */
+@Composable
+private fun GuessStrip(g: PayerMatch.Suggestion, isDebit: Boolean, onYes: () -> Unit, onNo: () -> Unit) {
+    val amount = rupees.format(g.share)
+    val text = when {
+        isDebit && g.clearsAll -> "Giving back all $amount of ${g.person}'s money you hold?"
+        isDebit -> "Giving back $amount of the ${rupees.format(g.open)} you hold for ${g.person}?"
+        g.item != null -> "${g.person} paying you back $amount for ${g.item?.label}?"
+        g.clearsAll -> "${g.person} paying back all $amount they owe you?"
+        else -> "${g.person} paying back $amount of the ${rupees.format(g.open)} they owe you?"
+    }
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp)
+            .clip(MaterialTheme.shapes.medium)
+            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f))
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text("👥 $text", style = MaterialTheme.typography.bodyMedium)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            CategoryChip("Yes, that's them", selected = true, onClick = onYes)
+            CategoryChip("Not this", selected = false, onClick = onNo)
         }
     }
 }
