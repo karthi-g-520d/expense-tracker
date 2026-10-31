@@ -404,7 +404,6 @@ private fun TagScreen(vm: MainViewModel, contentPadding: PaddingValues) {
 
     val txns by vm.unsynced.collectAsState()
     val people by vm.knownPeople.collectAsState()
-    val ledger by vm.peopleLedger.collectAsState()
 
     // Pull down to read new SMS, like Instagram or YouTube. The spinner stays up for a
     // short minimum so a fast read still reads as "checked" instead of a flicker.
@@ -465,6 +464,7 @@ private fun TagScreen(vm: MainViewModel, contentPadding: PaddingValues) {
 @Composable
 private fun TagList(vm: MainViewModel, txns: List<PendingTxn>, people: List<String>, contentPadding: PaddingValues) {
     val days = remember(txns) { txns.groupBy { it.date } }
+    val ledger by vm.peopleLedger.collectAsState()
     LazyColumn(
         Modifier.fillMaxSize(),
         contentPadding = contentPadding,
