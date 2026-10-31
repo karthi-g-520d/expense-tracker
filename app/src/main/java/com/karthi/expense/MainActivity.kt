@@ -404,6 +404,7 @@ private fun TagScreen(vm: MainViewModel, contentPadding: PaddingValues) {
 
     val txns by vm.unsynced.collectAsState()
     val people by vm.knownPeople.collectAsState()
+    val ledger by vm.peopleLedger.collectAsState()
 
     // Pull down to read new SMS, like Instagram or YouTube. The spinner stays up for a
     // short minimum so a fast read still reads as "checked" instead of a flicker.
@@ -479,7 +480,7 @@ private fun TagList(vm: MainViewModel, txns: List<PendingTxn>, people: List<Stri
                 )
             }
             items(dayTxns, key = { it.id }, contentType = { "txn" }) { t ->
-                TxnCard(t, people, Modifier.animateItem()) { category, reason, shares, parts -> vm.tag(t.id, category, reason, shares, parts) }
+                TxnCard(t, people, ledger, Modifier.animateItem()) { category, reason, shares, parts -> vm.tag(t.id, category, reason, shares, parts) }
             }
         }
     }
